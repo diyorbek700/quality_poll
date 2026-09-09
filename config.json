@@ -1,0 +1,50 @@
+{
+  "schedule": {
+    "timezone": "Asia/Tashkent",
+    "send_time": "10:00",
+    "close_time": "19:00",
+    "close_polls_enabled": true
+  },
+  "groups": {
+    "-549713305": {
+      "project_name": "Fortuna Nasiya",
+      "group_label": "Nasiya",
+      "own_service_question": "Bugungu kun holatiga Nasiya platformasi xizmatini baholang"
+    },
+    "-5375873169": {
+      "project_name": "Кредитный Конвейер",
+      "group_label": "Konveyer",
+      "own_service_question": "Bugungu kun holatiga Kredit Konveyer platformasi xizmatini baholang"
+    }
+  },
+  "own_service_description": "Iltimos tanlagan bahoingizga izoh qoldiring",
+  "partners": [
+    { "key": "KATM", "question_name": "KATM", "sheet_name": "KATM" },
+    { "key": "EGOV", "question_name": "EGOV", "sheet_name": "ERI" },
+    { "key": "MYID", "question_name": "MYID", "sheet_name": "MyID" },
+    { "key": "MULTICARD", "question_name": "MULTICARD", "sheet_name": "Multicard" },
+    { "key": "PLAYMOBILE", "question_name": "PLAYMOBILE", "sheet_name": "PlayMobile" }
+  ],
+  "poll_options": [
+    "1 — Juda yomon",
+    "2 — Yomon",
+    "3 — Qoniqarsiz",
+    "4 — O'rtachadan past",
+    "5 — O'rtacha",
+    "6 — Qoniqarli",
+    "7 — Yaxshi",
+    "8 — Juda yaxshi",
+    "9 — A'lo",
+    "10 — Mukammal / Zo'r"
+  ],
+  "sheets": {
+    "partners_tab": "Partners",
+    "projects_tab": "Projects",
+    "date_header": "Дата",
+    "partner_name_header": "Сервис",
+    "project_name_header": "Проект",
+    "average_header": "Средняя оценка",
+    "add_average_formula_on_new_row": true
+  },
+  "voter_map": {}
+}

@@ -1,0 +1,20 @@
+# Secrets
+.env
+service_account.json
+service-account*.json
+credentials*.json
+*-key.json
+
+# Runtime state
+polls.db
+*.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
