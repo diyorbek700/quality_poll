@@ -74,7 +74,41 @@ def require_env(name):
     return value
 
 
-async def run(send_now=False, close_now=False):
+async def check_groups(bot, cfg):
+    """Verify the bot can reach every configured group and may post polls."""
+    me = await bot.get_me()
+    all_ok = True
+    for cid, g in cfg["groups"].items():
+        label = g.get("group_label", "?")
+        try:
+            chat = await bot.get_chat(int(cid))
+        except Exception as e:
+            all_ok = False
+            logger.error(
+                "[%s] chat_id=%s UNREACHABLE: %s – add @%s to that group as an "
+                "admin; the bot logs the real chat_id on join (my_chat_member) "
+                "and also answers /chatid inside the group. Put that id in "
+                "config.json -> groups.",
+                label, cid, e, me.username)
+            continue
+        try:
+            member = await bot.get_chat_member(int(cid), me.id)
+            status = member.status
+        except Exception as e:
+            status = "unknown (%s)" % e
+        can_polls = getattr(member, "can_send_polls", None)
+        ok = status in ("administrator", "creator") or can_polls is True
+        all_ok = all_ok and ok
+        logger.info(
+            "[%s] chat_id=%s title=%r type=%s bot=%s can_send_polls=%s -> %s",
+            label, cid, chat.title, chat.type, status, can_polls,
+            "OK" if ok else "CANNOT POST POLLS",
+        )
+    logger.info("Group check %s", "PASSED" if all_ok else "FAILED")
+    return all_ok
+
+
+async def run(send_now=False, close_now=False, check_only=False):
     load_dotenv(BASE / ".env")
     token = require_env("TELEGRAM_BOT_TOKEN")
     sheet_id = require_env("GOOGLE_SHEET_ID")
@@ -85,6 +119,15 @@ async def run(send_now=False, close_now=False):
         raise SystemExit("Google credentials file not found: %s" % creds_path)
 
     cfg = load_config()
+
+    if check_only:
+        bot = Bot(token)
+        try:
+            await check_groups(bot, cfg)
+        finally:
+            await bot.session.close()
+        return
+
     storage.init_db()
 
     sheets = SheetsClient(creds_path, sheet_id, cfg)
@@ -147,11 +190,14 @@ def main():
                         help="send today's polls immediately on startup")
     parser.add_argument("--close-now", action="store_true",
                         help="close today's polls immediately on startup")
+    parser.add_argument("--check", action="store_true",
+                        help="check bot access to every configured group, then exit")
     args = parser.parse_args()
 
     setup_logging()
     try:
-        asyncio.run(run(send_now=args.send_now, close_now=args.close_now))
+        asyncio.run(run(send_now=args.send_now, close_now=args.close_now,
+                        check_only=args.check))
     except (KeyboardInterrupt, SystemExit) as e:
         if isinstance(e, SystemExit) and e.code not in (0, None):
             raise

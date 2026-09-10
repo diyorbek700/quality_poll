@@ -52,13 +52,22 @@ existing rows (a new row gets a fresh `AVERAGE` formula on creation if
 ### 1. Telegram bot
 
 1. Create a bot with [@BotFather](https://t.me/BotFather), copy the token.
-2. **Disable group privacy** is *not* required for poll answers, but the bot
-   **must be a member of both groups** with permission to **Send Polls**
-   (in a group with restricted permissions, make it an admin).
-3. Confirm the real numeric chat IDs. Supergroup IDs usually look like
-   `-100xxxxxxxxxx`. Add the bot to each group and check the logs, or forward a
-   message to [@RawDataBot](https://t.me/RawDataBot). Update `config.json` →
-   `groups` if they differ from the placeholders.
+2. Add the bot to **both groups** and make it an **admin** (the simplest way to
+   guarantee it can send polls; a plain member works only if the group grants
+   "Send Polls" to everyone).
+3. Confirm the real numeric chat IDs. The ones in `config.json` are guesses and
+   a group's id changes if it is upgraded to a supergroup (`-100xxxxxxxxxx`).
+   To get the real id:
+   - the moment you add the bot, it logs a line like
+     `my_chat_member: chat_id=-100123... title='Nasiya' ... -> bot is now 'administrator'`
+     to `bot.log`, **or**
+   - send **`/chatid`** in the group and the bot replies with the id.
+   Put the correct ids into `config.json` → `groups` (keep the
+   `project_name` / `group_label` / `own_service_question` values).
+4. Verify everything is wired up:
+   ```bash
+   python bot.py --check      # checks bot access + poll permission for every group, then exits
+   ```
 
 ### 2. Google Sheets
 
@@ -105,6 +114,7 @@ python bot.py
 Useful flags:
 
 ```bash
+python bot.py --check        # verify bot access to every group, then exit
 python bot.py --send-now     # send today's polls right away, then keep running
 python bot.py --close-now    # close today's polls right away, then keep running
 ```

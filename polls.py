@@ -16,7 +16,8 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramRetryAfter,
 )
-from aiogram.types import InputPollOption, PollAnswer
+from aiogram.filters import Command
+from aiogram.types import ChatMemberUpdated, InputPollOption, Message, PollAnswer
 
 import storage
 from sheets import SheetColumnMissing, extract_score
@@ -157,6 +158,40 @@ async def close_daily_polls():
             storage.mark_closed(p["poll_id"])
         except TelegramForbiddenError as e:
             logger.warning("Not allowed to stop poll_id=%s: %s", p["poll_id"], e)
+
+
+# --------------------------------------------------------------------------
+# Diagnostics – finding chat IDs / checking the bot is set up in a group
+# --------------------------------------------------------------------------
+
+@router.my_chat_member()
+async def on_my_chat_member(event: ChatMemberUpdated):
+    """Log whenever the bot is added to / removed from / promoted in a chat.
+    This is the easiest way to discover a group's numeric chat_id: add the
+    bot to the group and read this line from bot.log.
+    """
+    chat = event.chat
+    new_status = event.new_chat_member.status
+    configured = str(chat.id) in _CFG["groups"]
+    logger.info(
+        "my_chat_member: chat_id=%s title=%r type=%s -> bot is now '%s'%s",
+        chat.id, chat.title, chat.type, new_status,
+        "  [in config.json]" if configured else "  [NOT in config.json – "
+        "add this chat_id to the 'groups' section to send polls here]",
+    )
+
+
+@router.message(Command("chatid"))
+async def cmd_chatid(message: Message):
+    """Reply with the current chat's numeric id (use inside the group)."""
+    chat = message.chat
+    configured = str(chat.id) in _CFG["groups"]
+    await message.reply(
+        "chat_id: %s\ntype: %s\ntitle: %s\nin config.json: %s"
+        % (chat.id, chat.type, chat.title, "yes" if configured else "no")
+    )
+    logger.info("/chatid in chat_id=%s title=%r type=%s configured=%s",
+                chat.id, chat.title, chat.type, configured)
 
 
 # --------------------------------------------------------------------------
