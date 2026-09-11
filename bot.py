@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 
 import polls
 import storage
+import webserver
 from sheets import SheetsClient
 
 BASE = Path(__file__).parent
@@ -191,6 +192,14 @@ async def run(send_now=False, close_now=False, check_only=False):
         logger.info("--close-now: closing today's polls immediately")
         await polls.close_daily_polls()
 
+    # Render (and similar PaaS) inject $PORT only for Web Services. A
+    # Background Worker, a plain VM, or local dev never set it, so this is a
+    # no-op there — see webserver.py / README "Deploying to Render (free)".
+    web_runner = None
+    port = os.environ.get("PORT")
+    if port:
+        web_runner = await webserver.start(int(port))
+
     try:
         await dp.start_polling(
             bot,
@@ -198,6 +207,8 @@ async def run(send_now=False, close_now=False, check_only=False):
         )
     finally:
         scheduler.shutdown(wait=False)
+        if web_runner:
+            await web_runner.cleanup()
         await bot.session.close()
 
 

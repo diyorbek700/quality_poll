@@ -49,9 +49,12 @@ existing rows (a new row gets a fresh `AVERAGE` formula on creation if
 | `polls.py` | poll building/sending/closing + the `poll_answer` → sheet router |
 | `sheets.py` | Google Sheets client: header lookup, find-row / append-row / update-cell, retry/backoff |
 | `storage.py` | SQLite: `poll_id → metadata` map (survives restart) + last vote per user |
+| `webserver.py` | tiny HTTP server (`/`, `/healthz`), only started when `$PORT` is set — see "Deploying to Render (free)" |
 | `config.json` | groups, partners, poll options, schedule, sheet header names, `voter_map` |
-| `.env` / `.env.example` | secrets (token, sheet id, credentials path) |
+| `.env` / `.env.example` | secrets (token, sheet id, credentials path or JSON) |
 | `requirements.txt` | dependencies |
+| `render.yaml` | Render Blueprint for a one-click free Web Service deploy |
+| `quality-poll-bot.service.example` | example systemd unit for a plain VM / Background Worker deploy |
 
 ## Setup
 
@@ -146,39 +149,61 @@ the process if it dies. The `poll_id → metadata` map lives in `polls.db`, so a
 restart mid-day does not lose the ability to route votes for polls already
 sent that day.
 
-#### Deploying to Render
+#### Deploying to Render (free)
 
-Use a **Background Worker**, not a Web Service — this bot has no HTTP port to
-bind to, and a Web Service will be killed for failing Render's port check.
-Background Workers need a paid instance (they run continuously, so they're not
-eligible for the free tier).
+Render's **Background Worker** is the "obvious" fit but always requires a
+paid instance. To stay on the **free Web Service** tier instead, the bot
+also runs a tiny HTTP server (`webserver.py`) alongside its normal Telegram
+long-polling — purely so Render has a port to bind to and a `/healthz` route
+to check. It only starts when a `PORT` env var is present, which Render sets
+automatically for Web Services and nothing else sets, so this is a no-op
+everywhere else (VM, local dev, a Background Worker).
 
-1. Push this repo to GitHub (already done if you're reading this from there).
-2. Render dashboard → **New** → **Background Worker** → connect the repo.
-3. **Build Command**: `pip install -r requirements.txt`
-   **Start Command**: `python bot.py`
-4. **Environment** → add these variables:
+The catch: **free Web Services sleep after ~15 minutes with no HTTP
+request**, and a sleeping process can't fire its internal scheduler. The fix
+is a free external **uptime pinger** hitting `/healthz` every 5–10 minutes,
+which counts as traffic and keeps the instance from ever going idle — so the
+in-process scheduler keeps firing `send_time`/`close_time` exactly as
+configured.
+
+1. Push this repo to GitHub (already done if you're reading this from here).
+2. Render dashboard → **New** → **Blueprint** → pick this repo (it reads
+   [render.yaml](render.yaml) and creates a free Web Service with
+   `healthCheckPath: /healthz` already set). Or do it by hand: **New** →
+   **Web Service**, Build Command `pip install -r requirements.txt`, Start
+   Command `python bot.py`, plan **Free**.
+3. Fill in the env vars it prompts for (or add under **Environment**):
    | Key | Value |
    |---|---|
    | `TELEGRAM_BOT_TOKEN` | your bot token |
    | `GOOGLE_SHEET_ID` | your spreadsheet id |
    | `GOOGLE_CREDENTIALS_JSON` | the **entire contents** of `service_account.json`, pasted as one line |
-   Render has no persistent disk by default, so use `GOOGLE_CREDENTIALS_JSON`
+   Render's free tier has no persistent disk, so use `GOOGLE_CREDENTIALS_JSON`
    here rather than `GOOGLE_CREDENTIALS_PATH` — the bot reads the key straight
-   out of the env var, no file needed. (If you'd rather ship the file, Render's
-   **Secret Files** feature mounts one at a path you choose — then set
-   `GOOGLE_CREDENTIALS_PATH` to that path instead.)
-5. `config.json` is committed to the repo, so it deploys as-is — edit it in
+   out of the env var, no file needed.
+4. `config.json` is committed to the repo, so it deploys as-is — edit it in
    git (groups, partners, `voter_map`, schedule) and push to update it; no
    dashboard step needed for that file.
-6. Deploy, then check **Logs** in the Render dashboard for the same lines you
-   see locally (`Authorized as @...`, `Connected to spreadsheet '...'`,
-   `Scheduler started ...`). If it restarts in a loop, the logs will show why
-   (missing env var, bad credentials JSON, etc.) — the bot fails fast with a
-   clear message rather than hanging.
+5. Deploy, then check **Logs** for the same lines you see locally
+   (`Authorized as @...`, `Connected to spreadsheet '...'`,
+   `Scheduler started ...`, `Health-check web server listening on 0.0.0.0:...`).
+   A restart loop means the logs will show why (missing env var, bad
+   credentials JSON, etc.) — the bot fails fast with a clear message.
+6. **Set up the pinger** (do this or the service sleeps and misses its
+   schedule): create a free [UptimeRobot](https://uptimerobot.com) monitor
+   (or [cron-job.org](https://cron-job.org)) hitting
+   `https://<your-app>.onrender.com/healthz` every 5 minutes. `/healthz`
+   returns `{"status": "ok", "uptime_seconds": ...}` — a shrinking
+   `uptime_seconds` on repeated checks means it's still going to sleep
+   between pings and the interval needs to be shorter.
 7. Render's clock is UTC regardless of server region; `config.json` →
    `schedule.timezone` (`Asia/Tashkent`) is what the scheduler actually uses,
    so no timezone changes are needed there.
+
+If you'd rather not deal with a pinger at all and don't mind paying, the
+**Background Worker** path (no `webserver.py`/`PORT` involved, no sleeping)
+is simpler: same build/start commands, plan any paid tier instead of Free,
+and skip step 6 entirely.
 
 ## Logging
 

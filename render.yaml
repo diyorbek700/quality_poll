@@ -1,0 +1,25 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+# It creates a free Web Service; fill in the secret env vars it prompts for
+# (they're marked sync: false below so they're never stored in git).
+#
+# Free Web Services sleep after ~15 min without an HTTP request. Point a free
+# uptime pinger (UptimeRobot, cron-job.org, ...) at https://<your-app>.onrender.com/healthz
+# every 5-10 minutes to keep it awake so the in-process scheduler still fires
+# send_time/close_time exactly as configured in config.json.
+services:
+  - type: web
+    name: quality-poll-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
