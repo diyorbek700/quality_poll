@@ -146,6 +146,40 @@ the process if it dies. The `poll_id → metadata` map lives in `polls.db`, so a
 restart mid-day does not lose the ability to route votes for polls already
 sent that day.
 
+#### Deploying to Render
+
+Use a **Background Worker**, not a Web Service — this bot has no HTTP port to
+bind to, and a Web Service will be killed for failing Render's port check.
+Background Workers need a paid instance (they run continuously, so they're not
+eligible for the free tier).
+
+1. Push this repo to GitHub (already done if you're reading this from there).
+2. Render dashboard → **New** → **Background Worker** → connect the repo.
+3. **Build Command**: `pip install -r requirements.txt`
+   **Start Command**: `python bot.py`
+4. **Environment** → add these variables:
+   | Key | Value |
+   |---|---|
+   | `TELEGRAM_BOT_TOKEN` | your bot token |
+   | `GOOGLE_SHEET_ID` | your spreadsheet id |
+   | `GOOGLE_CREDENTIALS_JSON` | the **entire contents** of `service_account.json`, pasted as one line |
+   Render has no persistent disk by default, so use `GOOGLE_CREDENTIALS_JSON`
+   here rather than `GOOGLE_CREDENTIALS_PATH` — the bot reads the key straight
+   out of the env var, no file needed. (If you'd rather ship the file, Render's
+   **Secret Files** feature mounts one at a path you choose — then set
+   `GOOGLE_CREDENTIALS_PATH` to that path instead.)
+5. `config.json` is committed to the repo, so it deploys as-is — edit it in
+   git (groups, partners, `voter_map`, schedule) and push to update it; no
+   dashboard step needed for that file.
+6. Deploy, then check **Logs** in the Render dashboard for the same lines you
+   see locally (`Authorized as @...`, `Connected to spreadsheet '...'`,
+   `Scheduler started ...`). If it restarts in a loop, the logs will show why
+   (missing env var, bad credentials JSON, etc.) — the bot fails fast with a
+   clear message rather than hanging.
+7. Render's clock is UTC regardless of server region; `config.json` →
+   `schedule.timezone` (`Asia/Tashkent`) is what the scheduler actually uses,
+   so no timezone changes are needed there.
+
 ## Logging
 
 Logs go to both the console and `bot.log` (rotating, 5 MB × 5). They record:

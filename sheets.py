@@ -70,10 +70,22 @@ def extract_score(option_text):
 
 
 class SheetsClient:
-    def __init__(self, credentials_path, sheet_id, cfg):
-        creds = Credentials.from_service_account_file(
-            credentials_path, scopes=SCOPES
-        )
+    def __init__(self, sheet_id, cfg, credentials_path=None, credentials_info=None):
+        """Either `credentials_path` (a service-account JSON file on disk) or
+        `credentials_info` (the parsed JSON as a dict — handy on PaaS hosts
+        where pasting the key into an env var is easier than shipping a file)
+        must be given.
+        """
+        if credentials_info is not None:
+            creds = Credentials.from_service_account_info(
+                credentials_info, scopes=SCOPES
+            )
+        elif credentials_path is not None:
+            creds = Credentials.from_service_account_file(
+                credentials_path, scopes=SCOPES
+            )
+        else:
+            raise ValueError("SheetsClient needs credentials_path or credentials_info")
         self._gc = gspread.authorize(creds)
         self._sheet_id = sheet_id
         self._sh = self._open()

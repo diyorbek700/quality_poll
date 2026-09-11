@@ -108,16 +108,30 @@ async def check_groups(bot, cfg):
     return all_ok
 
 
-async def run(send_now=False, close_now=False, check_only=False):
-    load_dotenv(BASE / ".env")
-    token = require_env("TELEGRAM_BOT_TOKEN")
-    sheet_id = require_env("GOOGLE_SHEET_ID")
+def resolve_google_credentials():
+    """Either GOOGLE_CREDENTIALS_JSON (the service-account key, pasted whole
+    into an env var — the easy option on PaaS hosts like Render/Railway) or
+    GOOGLE_CREDENTIALS_PATH (a file on disk) must be set. Returns kwargs
+    ready to pass to SheetsClient(...).
+    """
+    raw_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if raw_json:
+        try:
+            return {"credentials_info": json.loads(raw_json)}
+        except json.JSONDecodeError as e:
+            raise SystemExit("GOOGLE_CREDENTIALS_JSON is not valid JSON: %s" % e)
+
     creds_path = require_env("GOOGLE_CREDENTIALS_PATH")
     if not Path(creds_path).is_absolute():
         creds_path = str((BASE / creds_path).resolve())
     if not Path(creds_path).exists():
         raise SystemExit("Google credentials file not found: %s" % creds_path)
+    return {"credentials_path": creds_path}
 
+
+async def run(send_now=False, close_now=False, check_only=False):
+    load_dotenv(BASE / ".env")
+    token = require_env("TELEGRAM_BOT_TOKEN")
     cfg = load_config()
 
     if check_only:
@@ -128,9 +142,12 @@ async def run(send_now=False, close_now=False, check_only=False):
             await bot.session.close()
         return
 
+    sheet_id = require_env("GOOGLE_SHEET_ID")
+    creds_kwargs = resolve_google_credentials()
+
     storage.init_db()
 
-    sheets = SheetsClient(creds_path, sheet_id, cfg)
+    sheets = SheetsClient(sheet_id, cfg, **creds_kwargs)
 
     bot = Bot(token)
     me = await bot.get_me()
