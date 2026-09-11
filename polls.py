@@ -194,6 +194,23 @@ async def cmd_chatid(message: Message):
                 chat.id, chat.title, chat.type, configured)
 
 
+@router.message(Command("myid"))
+async def cmd_myid(message: Message):
+    """Reply with the sender's numeric user_id, to help fill voter_map.
+    Have each voter send /myid once (in the group or in a DM to the bot).
+    """
+    user = message.from_user
+    mapped = _CFG["voter_map"].get(str(user.id))
+    await message.reply(
+        "user_id: %s\nname: %s\nusername: @%s\nin voter_map: %s"
+        % (user.id, user.full_name, user.username or "-", mapped or "no")
+    )
+    logger.info(
+        "/myid: user_id=%s name=%r username=@%s mapped_to=%s",
+        user.id, user.full_name, user.username, mapped,
+    )
+
+
 # --------------------------------------------------------------------------
 # Receiving votes
 # --------------------------------------------------------------------------

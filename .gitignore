@@ -10,6 +10,9 @@ polls.db
 *.log
 logs/
 
+# macOS
+.DS_Store
+
 # Python
 __pycache__/
 *.py[cod]

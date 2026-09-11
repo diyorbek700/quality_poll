@@ -23,10 +23,16 @@ clearing the cell.
 
 ### Where votes land
 
-* **Partner polls** → tab **`Partners`**. One row per partner per day. Votes for
-  the same partner from *either* group merge into the **same row**.
-  `EGOV` in the poll text is written as **`ERI`** in the sheet (same partner).
-* **Own-service poll** → tab **`Projects`**. The Nasiya group's poll writes the
+* **Partner polls** → the tab named in `config.json` → `sheets.partners_tab`
+  (currently `Оценка эффективности Сторонних Сервисов`). One row per partner
+  per day. Votes for the same partner from *either* group merge into the
+  **same row**. The poll text says `EGOV` but the sheet row (and
+  `partners[].sheet_name` in config) uses **`ERI`** — same partner, matching
+  the existing header. `KATM` is written as the sheet's own **`КАТМ`**
+  (Cyrillic) and `PLAYMOBILE` as **`Playmobile`** — match `config.json` to
+  whatever your sheet actually has if you rename anything there.
+* **Own-service poll** → the tab named in `sheets.projects_tab` (currently
+  `Оценка эффективности проектов`). The Nasiya group's poll writes the
   `Fortuna Nasiya` row, the Konveyer group's poll writes the
   `Кредитный Конвейер` row.
 
@@ -99,8 +105,11 @@ user_id** (string key) to the **exact column header** used in the sheets:
 }
 ```
 
-To find a user_id: have them vote once while the bot runs — an unmapped voter is
-logged as a warning with their `user_id`, `@username` and full name. Then add
+To find a user_id, easiest first: have each person send **`/myid`** to the bot
+(in the group, or in a DM) — it replies with their `user_id`, name and
+username. You can also just have them vote once while the bot runs — an
+unmapped voter is logged as a warning with their `user_id`, `@username` and
+full name. Then add
 them and they can re-vote.
 
 ### 4. Install & run

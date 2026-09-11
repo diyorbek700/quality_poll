@@ -1,12 +1,12 @@
 {
   "schedule": {
-    "timezone": "Asia/Tashkent",
-    "send_time": "10:00",
-    "close_time": "19:00",
-    "close_polls_enabled": true
-  },
+  "timezone": "Asia/Tashkent",
+  "send_time": "20:30",
+  "close_polls_enabled": false,
+  "close_time": "19:00"
+},
   "groups": {
-    "-549713305": {
+    "-5497213305": {
       "project_name": "Fortuna Nasiya",
       "group_label": "Nasiya",
       "own_service_question": "Bugungu kun holatiga Nasiya platformasi xizmatini baholang"
@@ -19,11 +19,11 @@
   },
   "own_service_description": "Iltimos tanlagan bahoingizga izoh qoldiring",
   "partners": [
-    { "key": "KATM", "question_name": "KATM", "sheet_name": "KATM" },
+    { "key": "KATM", "question_name": "KATM", "sheet_name": "КАТМ" },
     { "key": "EGOV", "question_name": "EGOV", "sheet_name": "ERI" },
     { "key": "MYID", "question_name": "MYID", "sheet_name": "MyID" },
     { "key": "MULTICARD", "question_name": "MULTICARD", "sheet_name": "Multicard" },
-    { "key": "PLAYMOBILE", "question_name": "PLAYMOBILE", "sheet_name": "PlayMobile" }
+    { "key": "PLAYMOBILE", "question_name": "PLAYMOBILE", "sheet_name": "Playmobile" }
   ],
   "poll_options": [
     "1 — Juda yomon",
@@ -38,8 +38,8 @@
     "10 — Mukammal / Zo'r"
   ],
   "sheets": {
-    "partners_tab": "Partners",
-    "projects_tab": "Projects",
+    "partners_tab": "Оценка эффективности Сторонних Сервисов",
+    "projects_tab": "Оценка эффективности проектов",
     "date_header": "Дата",
     "partner_name_header": "Сервис",
     "project_name_header": "Проект",
