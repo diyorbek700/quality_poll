@@ -128,9 +128,23 @@ python bot.py --send-now     # send today's polls right away, then keep running
 python bot.py --close-now    # close today's polls right away, then keep running
 ```
 
-Run it under a process manager (systemd, supervisor, `screen`/`tmux`, …) so it
-stays up. The `poll_id → metadata` map is in `polls.db`, so a restart does not
-lose the ability to route votes for polls already sent today.
+### 5. Deploy (keep it running 24/7)
+
+The scheduler only fires while the process is alive, so it needs to run under
+a process manager on a server:
+
+```bash
+sudo cp quality-poll-bot.service.example /etc/systemd/system/quality-poll-bot.service
+sudo nano /etc/systemd/system/quality-poll-bot.service   # set User and the real paths
+sudo systemctl daemon-reload
+sudo systemctl enable --now quality-poll-bot
+journalctl -u quality-poll-bot -f   # watch it come up
+```
+
+supervisor, `screen`/`tmux`, or a container work too — anything that restarts
+the process if it dies. The `poll_id → metadata` map lives in `polls.db`, so a
+restart mid-day does not lose the ability to route votes for polls already
+sent that day.
 
 ## Logging
 

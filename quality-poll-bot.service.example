@@ -1,0 +1,27 @@
+# Example systemd unit for running the bot on a Linux server.
+#
+# Install:
+#   sudo cp quality-poll-bot.service.example /etc/systemd/system/quality-poll-bot.service
+#   sudo nano /etc/systemd/system/quality-poll-bot.service   # fix User/paths below
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now quality-poll-bot
+#
+# Logs:
+#   journalctl -u quality-poll-bot -f      # console output
+#   tail -f /opt/quality_poll/bot.log      # the bot's own rotating log file
+
+[Unit]
+Description=Quality-assessment poll bot (Telegram -> Google Sheets)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quality-poll
+WorkingDirectory=/opt/quality_poll
+ExecStart=/opt/quality_poll/.venv/bin/python /opt/quality_poll/bot.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
