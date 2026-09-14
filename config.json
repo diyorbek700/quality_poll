@@ -1,7 +1,7 @@
 {
   "schedule": {
   "timezone": "Asia/Tashkent",
-  "send_time": "20:30",
+  "send_time": "19:50",
   "close_polls_enabled": false,
   "close_time": "19:00"
 },
