@@ -164,7 +164,7 @@ async def run(send_now=False, close_now=False, check_only=False):
     send_h, send_m = (int(x) for x in cfg["schedule"]["send_time"].split(":"))
     scheduler.add_job(
         polls.send_daily_polls,
-        CronTrigger(hour=send_h, minute=send_m),
+        CronTrigger(hour=send_h, minute=send_m, timezone=tz),
         id="send_daily_polls",
         misfire_grace_time=3600,
     )
@@ -174,7 +174,7 @@ async def run(send_now=False, close_now=False, check_only=False):
         )
         scheduler.add_job(
             polls.close_daily_polls,
-            CronTrigger(hour=close_h, minute=close_m),
+            CronTrigger(hour=close_h, minute=close_m, timezone=tz),
             id="close_daily_polls",
             misfire_grace_time=3600,
         )
