@@ -108,12 +108,15 @@ user_id** (string key) to the **exact column header** used in the sheets:
 }
 ```
 
-To find a user_id, easiest first: have each person send **`/myid`** to the bot
-(in the group, or in a DM) — it replies with their `user_id`, name and
-username. You can also just have them vote once while the bot runs — an
-unmapped voter is logged as a warning with their `user_id`, `@username` and
-full name. Then add
-them and they can re-vote.
+To find a user_id, easiest first: have each person open a DM with the bot and
+send **`/start`** — Telegram only lets a bot message a user privately after
+that user has started a chat with it, so this is also how each person
+unlocks ever getting a private message from the bot at all. `/start` replies
+with a short announcement and, from then on, they can also send **`/myid`**
+(in the group or in the DM) to get their `user_id`, name and username. You
+can also just have them vote once while the bot runs — an unmapped voter is
+logged as a warning with their `user_id`, `@username` and full name. Then add
+them to `voter_map` and they can re-vote.
 
 ### 4. Install & run
 

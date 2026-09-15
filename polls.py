@@ -10,13 +10,13 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import (
     TelegramBadRequest,
     TelegramForbiddenError,
     TelegramRetryAfter,
 )
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from aiogram.types import ChatMemberUpdated, InputPollOption, Message, PollAnswer
 
 import storage
@@ -111,23 +111,17 @@ STARTUP_NOTICE_TEXT = (
 )
 
 
-async def send_startup_notice_once():
-    """Post a one-time announcement to every configured group the first time
-    the bot ever starts (persisted in storage, so later restarts/redeploys
-    don't repeat it).
+@router.message(CommandStart(), F.chat.type == "private")
+async def cmd_start(message: Message):
+    """Each group member has to DM the bot /start at least once — this is
+    also what unlocks the bot being able to message them privately at all
+    (Telegram forbids a bot from messaging a user who never started a chat
+    with it). Sends the announcement text every time /start is used.
     """
-    if storage.get_flag("startup_notice_sent"):
-        return
-    for chat_id_str, group in _CFG["groups"].items():
-        chat_id = int(chat_id_str)
-        try:
-            await _BOT.send_message(chat_id, STARTUP_NOTICE_TEXT)
-            logger.info("Sent startup notice to %s (%s)", chat_id,
-                        group.get("group_label"))
-        except (TelegramForbiddenError, TelegramBadRequest) as e:
-            logger.error("Could not send startup notice to %s (%s): %s",
-                         chat_id, group.get("group_label"), e)
-    storage.set_flag("startup_notice_sent")
+    await message.answer(STARTUP_NOTICE_TEXT)
+    user = message.from_user
+    logger.info("/start (private) from user_id=%s name=%r username=@%s",
+                user.id, user.full_name, user.username)
 
 
 async def send_daily_polls():

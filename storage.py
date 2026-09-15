@@ -67,32 +67,7 @@ def init_db():
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_polls_date ON polls(date)")
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS meta (
-                key   TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """
-        )
     logger.info("SQLite storage ready at %s", DB_PATH)
-
-
-def get_flag(key):
-    with _lock, _connect() as conn:
-        row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else None
-
-
-def set_flag(key, value="1"):
-    with _lock, _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO meta (key, value) VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            (key, value),
-        )
 
 
 def save_poll(meta):
