@@ -63,7 +63,15 @@ existing rows (a new row gets a fresh `AVERAGE` formula on creation if
 1. Create a bot with [@BotFather](https://t.me/BotFather), copy the token.
 2. Add the bot to **both groups** and make it an **admin** (the simplest way to
    guarantee it can send polls; a plain member works only if the group grants
-   "Send Polls" to everyone).
+   "Send Polls" to everyone). The bot never calls any Telegram API that needs
+   admin rights (no ban/kick/restrict/delete/pin anywhere in this codebase —
+   sending/stopping polls needs neither), so when you promote it, open its
+   **Edit Administrator Rights** screen and **uncheck every single right**.
+   An admin with zero rights still bypasses a group's "only admins can send
+   polls" restriction, which is the only reason it needs to be an admin at
+   all — there's no upside to leaving `Ban users`, `Delete messages`, etc.
+   switched on, only unnecessary risk if that admin's rights were ever
+   misused by something other than this bot.
 3. Confirm the real numeric chat IDs. The ones in `config.json` are guesses and
    a group's id changes if it is upgraded to a supergroup (`-100xxxxxxxxxx`).
    To get the real id:
@@ -77,6 +85,11 @@ existing rows (a new row gets a fresh `AVERAGE` formula on creation if
    ```bash
    python bot.py --check      # checks bot access + poll permission for every group, then exits
    ```
+   This also logs a warning per group listing any admin rights the bot holds
+   that it never uses (`can_restrict_members`, `can_delete_messages`, etc.) —
+   only a human admin can revoke them (the bot can't edit its own rights), so
+   treat that warning as a to-do in Telegram's group settings, not something
+   this codebase can fix on its own.
 
 ### 2. Google Sheets
 

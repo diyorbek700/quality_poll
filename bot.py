@@ -105,8 +105,47 @@ async def check_groups(bot, cfg):
             label, cid, chat.title, chat.type, status, can_polls,
             "OK" if ok else "CANNOT POST POLLS",
         )
+        if status == "administrator":
+            _warn_unneeded_admin_rights(label, member)
     logger.info("Group check %s", "PASSED" if all_ok else "FAILED")
     return all_ok
+
+
+# This bot never calls banChatMember / restrictChatMember / promoteChatMember
+# / deleteMessage etc. -- it only sends/stops polls and sends messages, none
+# of which require admin rights at all (a poll only needs the "Send Polls"
+# member permission; stopPoll only needs to be the poll's own creator). Any
+# of these rights being granted to it is therefore unused and unnecessary --
+# only a human admin can revoke them (via Edit Administrator Rights), the
+# bot can't do it to itself, so this just surfaces what's worth tightening.
+_UNNEEDED_ADMIN_RIGHTS = [
+    "can_restrict_members",
+    "can_promote_members",
+    "can_delete_messages",
+    "can_pin_messages",
+    "can_manage_chat",
+    "can_manage_video_chats",
+    "can_invite_users",
+    "is_anonymous",
+]
+
+
+def _warn_unneeded_admin_rights(label, member):
+    granted = [r for r in _UNNEEDED_ADMIN_RIGHTS if getattr(member, r, False)]
+    if granted:
+        logger.warning(
+            "[%s] bot has admin rights it never uses: %s -- consider opening "
+            "that group's Administrators list, editing this bot's rights, and "
+            "unchecking all of them (the bot only needs to exist as *some* "
+            "kind of admin to bypass 'Send Polls' member restrictions; it "
+            "calls no API that needs any of these)",
+            label, ", ".join(granted),
+        )
+    else:
+        logger.info(
+            "[%s] bot's admin rights already minimal (none of %s granted) — good",
+            label, ", ".join(_UNNEEDED_ADMIN_RIGHTS),
+        )
 
 
 def resolve_google_credentials():
