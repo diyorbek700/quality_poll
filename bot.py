@@ -157,6 +157,7 @@ async def run(send_now=False, close_now=False, check_only=False):
     dp = Dispatcher()
     dp.include_router(polls.router)
     polls.configure(bot, sheets, cfg)
+    await polls.send_startup_notice_once()
 
     tz = ZoneInfo(cfg["schedule"]["timezone"])
     scheduler = AsyncIOScheduler(timezone=tz)

@@ -106,6 +106,30 @@ async def _send_one_poll(chat_id, question, meta_extra):
     return meta
 
 
+STARTUP_NOTICE_TEXT = (
+    "🎉 Поздравляем! Теперь ваши оценки будут вестись в специальном отчёте."
+)
+
+
+async def send_startup_notice_once():
+    """Post a one-time announcement to every configured group the first time
+    the bot ever starts (persisted in storage, so later restarts/redeploys
+    don't repeat it).
+    """
+    if storage.get_flag("startup_notice_sent"):
+        return
+    for chat_id_str, group in _CFG["groups"].items():
+        chat_id = int(chat_id_str)
+        try:
+            await _BOT.send_message(chat_id, STARTUP_NOTICE_TEXT)
+            logger.info("Sent startup notice to %s (%s)", chat_id,
+                        group.get("group_label"))
+        except (TelegramForbiddenError, TelegramBadRequest) as e:
+            logger.error("Could not send startup notice to %s (%s): %s",
+                         chat_id, group.get("group_label"), e)
+    storage.set_flag("startup_notice_sent")
+
+
 async def send_daily_polls():
     """Send the 6 polls (1 own-service + 5 partner) to every configured group."""
     day = _today_str()
