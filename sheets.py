@@ -225,3 +225,20 @@ class SheetsClient:
                 cell_value, row,
             )
             return row
+
+    def ensure_row(self, tab_name, name_header, entity_name, date_str):
+        """Make sure a row for (date_str, entity_name) exists in tab_name,
+        creating it (blank person-columns, an average formula if configured)
+        when it doesn't -- without writing to any voter's cell. Used to
+        proactively lay down today's rows for every partner/project when
+        the polls are sent, instead of only on the first vote for that day.
+        """
+        with self._write_lock:
+            date_col = self._col_index(tab_name, self._s["date_header"])
+            name_col = self._col_index(tab_name, name_header)
+            row = self._find_row(tab_name, date_col, date_str, name_col,
+                                 entity_name)
+            if row is None:
+                row = self._create_row(tab_name, date_col, date_str, name_col,
+                                       entity_name)
+            return row

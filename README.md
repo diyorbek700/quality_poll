@@ -36,6 +36,11 @@ clearing the cell.
   `Fortuna Nasiya` row, the Konveyer group's poll writes the
   `Кредитный Конвейер` row.
 
+Every day's row for each partner/project is created the moment the polls are
+sent (blank, average formula only) — not only once the first vote comes in —
+so today's date always shows up in the sheet immediately, even before anyone
+has voted.
+
 Each voter's score goes into the column whose header matches their name in
 `config.json` → `voter_map`. The `Средняя оценка` column is never written to for
 existing rows (a new row gets a fresh `AVERAGE` formula on creation if

@@ -124,8 +124,27 @@ async def cmd_start(message: Message):
                 user.id, user.full_name, user.username)
 
 
+async def _ensure_row(tab, name_header, entity_name, day):
+    try:
+        await asyncio.to_thread(
+            _SHEETS.ensure_row, tab, name_header, entity_name, day
+        )
+    except Exception:
+        logger.exception(
+            "Failed to ensure today's row exists in %r for %s / %s",
+            tab, day, entity_name,
+        )
+
+
 async def send_daily_polls():
-    """Send the 6 polls (1 own-service + 5 partner) to every configured group."""
+    """Send the 6 polls (1 own-service + 5 partner) to every configured group.
+
+    Also proactively lays down today's row for every project and partner in
+    the sheet (blank, average formula only) right away, instead of waiting
+    for the first vote to create it -- so today's date shows up for
+    everyone even before anyone has voted, matching how the sheet was kept
+    before this bot existed.
+    """
     day = _today_str()
     logger.info("=== Daily poll run for %s ===", day)
     sent = 0
@@ -142,6 +161,9 @@ async def send_daily_polls():
             "project_name": group["project_name"],
         }):
             sent += 1
+        await _ensure_row(_CFG["sheets"]["projects_tab"],
+                          _CFG["sheets"]["project_name_header"],
+                          group["project_name"], day)
 
         for partner in _CFG["partners"]:
             if await _send_one_poll(chat_id, _partner_question(partner), {
@@ -151,6 +173,11 @@ async def send_daily_polls():
                 "partner_sheet_name": partner["sheet_name"],
             }):
                 sent += 1
+
+    for partner in _CFG["partners"]:
+        await _ensure_row(_CFG["sheets"]["partners_tab"],
+                          _CFG["sheets"]["partner_name_header"],
+                          partner["sheet_name"], day)
 
     logger.info("Daily poll run finished: %d/%d polls sent",
                 sent, len(_CFG["groups"]) * (1 + len(_CFG["partners"])))
