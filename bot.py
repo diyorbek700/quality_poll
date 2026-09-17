@@ -189,6 +189,15 @@ async def run(send_now=False, close_now=False, check_only=False):
 
     sheets = SheetsClient(sheet_id, cfg, **creds_kwargs)
 
+    try:
+        storage.import_poll_log(sheets.load_poll_log())
+    except Exception:
+        logger.exception(
+            "Could not import the sheet-backed poll log -- votes on polls "
+            "sent by a previous instance may be routed as 'unknown poll_id' "
+            "until they're resent"
+        )
+
     bot = Bot(token)
     me = await bot.get_me()
     logger.info("Authorized as @%s (id=%s)", me.username, me.id)

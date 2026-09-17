@@ -242,3 +242,59 @@ class SheetsClient:
                 row = self._create_row(tab_name, date_col, date_str, name_col,
                                        entity_name)
             return row
+
+    # -- poll_id -> metadata log (survives a redeploy on hosts with no -----
+    # -- persistent disk, e.g. Render's free tier, unlike local SQLite) ----
+
+    POLL_LOG_HEADERS = [
+        "poll_id", "date", "poll_type", "chat_id", "message_id",
+        "group_label", "project_name", "partner_key", "partner_sheet_name",
+        "question", "closed",
+    ]
+
+    @_retry
+    def _poll_log_ws(self):
+        tab_name = self._s.get("poll_log_tab", "PollLog")
+        ws = self._ws_cache.get(tab_name)
+        if ws is not None:
+            return ws
+        try:
+            ws = self._sh.worksheet(tab_name)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = self._sh.add_worksheet(
+                title=tab_name, rows=2000, cols=len(self.POLL_LOG_HEADERS)
+            )
+            ws.append_row(self.POLL_LOG_HEADERS, value_input_option="RAW")
+            logger.info("Created missing %r tab for poll metadata", tab_name)
+        self._ws_cache[tab_name] = ws
+        return ws
+
+    @_retry
+    def load_poll_log(self):
+        """All poll metadata ever recorded, as a list of dicts -- used once at
+        startup to recover the poll_id -> metadata map after a restart that
+        wiped local storage.
+        """
+        return self._poll_log_ws().get_all_records()
+
+    @_retry
+    def append_poll_log(self, meta):
+        self._poll_log_ws().append_row(
+            [
+                str(meta["poll_id"]), meta["date"], meta["poll_type"],
+                meta["chat_id"], meta["message_id"],
+                meta.get("group_label") or "", meta.get("project_name") or "",
+                meta.get("partner_key") or "", meta.get("partner_sheet_name") or "",
+                meta.get("question") or "", 0,
+            ],
+            value_input_option="RAW",
+        )
+
+    @_retry
+    def mark_poll_log_closed(self, poll_id):
+        ws = self._poll_log_ws()
+        closed_col = len(self.POLL_LOG_HEADERS)
+        for i, row in enumerate(ws.get_all_values()[1:], start=2):
+            if row and row[0] == str(poll_id):
+                ws.update_cell(i, closed_col, 1)
+                return

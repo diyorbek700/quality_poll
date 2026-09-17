@@ -98,6 +98,14 @@ async def _send_one_poll(chat_id, question, meta_extra):
     }
     meta.update(meta_extra)
     storage.save_poll(meta)
+    try:
+        await asyncio.to_thread(_SHEETS.append_poll_log, meta)
+    except Exception:
+        logger.exception(
+            "Failed to append poll_id=%s to the sheet-backed poll log -- it "
+            "will still route votes locally until the next restart",
+            meta["poll_id"],
+        )
     logger.info(
         "Sent %s poll to %s (%s): poll_id=%s message_id=%s",
         meta["poll_type"], chat_id, meta.get("group_label"), meta["poll_id"],
@@ -183,6 +191,17 @@ async def send_daily_polls():
                 sent, len(_CFG["groups"]) * (1 + len(_CFG["partners"])))
 
 
+async def _mark_closed(poll_id):
+    storage.mark_closed(poll_id)
+    try:
+        await asyncio.to_thread(_SHEETS.mark_poll_log_closed, poll_id)
+    except Exception:
+        logger.exception(
+            "Failed to mark poll_id=%s closed in the sheet-backed poll log",
+            poll_id,
+        )
+
+
 async def close_daily_polls():
     """stopPoll every still-open poll for today. Votes already recorded stay;
     real-time processing of votes is unaffected because it is driven by
@@ -194,13 +213,13 @@ async def close_daily_polls():
     for p in polls:
         try:
             await _BOT.stop_poll(p["chat_id"], p["message_id"])
-            storage.mark_closed(p["poll_id"])
+            await _mark_closed(p["poll_id"])
             logger.info("Closed poll_id=%s (%s)", p["poll_id"],
                         p.get("partner_key") or p.get("project_name"))
         except TelegramBadRequest as e:
             # Already closed, message deleted, etc. – not fatal.
             logger.warning("Could not stop poll_id=%s: %s", p["poll_id"], e)
-            storage.mark_closed(p["poll_id"])
+            await _mark_closed(p["poll_id"])
         except TelegramForbiddenError as e:
             logger.warning("Not allowed to stop poll_id=%s: %s", p["poll_id"], e)
 

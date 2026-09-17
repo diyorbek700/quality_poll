@@ -166,9 +166,15 @@ journalctl -u quality-poll-bot -f   # watch it come up
 ```
 
 supervisor, `screen`/`tmux`, or a container work too — anything that restarts
-the process if it dies. The `poll_id → metadata` map lives in `polls.db`, so a
-restart mid-day does not lose the ability to route votes for polls already
-sent that day.
+the process if it dies. The `poll_id → metadata` map lives in `polls.db`
+(local SQLite, fast) **and** is mirrored to a `PollLog` tab in the spreadsheet
+(auto-created on first use) every time a poll is sent or closed. On startup
+the bot re-imports everything from `PollLog` into `polls.db` before doing
+anything else. This matters specifically on hosts with no persistent disk
+(Render's free tier included) — every redeploy wipes `polls.db`, so without
+the sheet-backed copy, votes on any poll sent by the *previous* instance
+would come back as "unknown poll_id" and be silently dropped. With it, a
+redeploy mid-day is safe: the new instance recovers everything on startup.
 
 #### Deploying to Render (free)
 

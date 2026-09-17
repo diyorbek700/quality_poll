@@ -44,7 +44,8 @@
     "partner_name_header": "Сервис",
     "project_name_header": "Проект",
     "average_header": "Средняя оценка",
-    "add_average_formula_on_new_row": true
+    "add_average_formula_on_new_row": true,
+    "poll_log_tab": "PollLog"
   },
   "voter_map": {
     "8624497539": "Diyorbek"

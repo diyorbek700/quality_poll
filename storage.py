@@ -112,6 +112,47 @@ def save_poll(meta):
         )
 
 
+def import_poll_log(rows):
+    """Bulk-load poll metadata recovered from the sheet-backed poll log
+    (SheetsClient.load_poll_log) into local storage. Used once at startup so
+    that polls sent by a previous process instance -- one whose local
+    storage.db was wiped by a redeploy on a host with no persistent disk,
+    e.g. Render's free tier -- can still have their votes routed correctly.
+    Existing local rows are left untouched (``INSERT OR IGNORE``).
+    """
+    if not rows:
+        return
+    with _lock, _connect() as conn:
+        for r in rows:
+            poll_id = str(r.get("poll_id") or "").strip()
+            if not poll_id:
+                continue
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO polls (
+                    poll_id, date, poll_type, chat_id, message_id, group_label,
+                    project_name, partner_key, partner_sheet_name, question,
+                    closed, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    poll_id,
+                    r.get("date"),
+                    r.get("poll_type"),
+                    int(r.get("chat_id") or 0),
+                    int(r.get("message_id") or 0),
+                    r.get("group_label") or None,
+                    r.get("project_name") or None,
+                    r.get("partner_key") or None,
+                    r.get("partner_sheet_name") or None,
+                    r.get("question") or None,
+                    int(r.get("closed") or 0),
+                    _now_iso(),
+                ),
+            )
+    logger.info("Imported %d poll(s) from the sheet-backed poll log", len(rows))
+
+
 def get_poll(poll_id):
     with _lock, _connect() as conn:
         row = conn.execute(
