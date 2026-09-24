@@ -132,6 +132,35 @@ class SheetsClient:
             values, value_input_option="USER_ENTERED", table_range="A1"
         )
 
+    @_retry
+    def _draw_day_borders(self, tab_name, rows, width):
+        """Solid black line on top of each given row (1-based), across the
+        first ``width`` columns -- the separator the admin draws between days.
+        Uses updateBorders so the cells' other edges are left untouched.
+        """
+        if not rows:
+            return
+        sheet_id = self._worksheet(tab_name).id
+        requests = [
+            {
+                "updateBorders": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": r - 1,
+                        "endRowIndex": r,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": width,
+                    },
+                    "top": {
+                        "style": "SOLID",
+                        "color": {"red": 0, "green": 0, "blue": 0},
+                    },
+                }
+            }
+            for r in rows
+        ]
+        self._sh.batch_update({"requests": requests})
+
     # -- helpers -----------------------------------------------------------
 
     def _col_index(self, tab_name, header, required=True):
@@ -181,7 +210,13 @@ class SheetsClient:
                 values[avg_col - 1] = "=IFERROR(AVERAGE(%s:%s),\"\")" % (start, end)
 
         self._append_row(tab_name, values)
+        all_values = self._all_values(tab_name)
         row = self._find_row(tab_name, date_col, date_str, name_col, name)
+        if row and row > 2:
+            prev = all_values[row - 2]
+            prev_date = prev[date_col - 1].strip() if len(prev) >= date_col else ""
+            if prev_date != date_str:
+                self._draw_day_borders(tab_name, [row], width)
         logger.info(
             "Created new row %s in %r for %s / %s", row, tab_name, date_str, name
         )
@@ -242,6 +277,28 @@ class SheetsClient:
                 row = self._create_row(tab_name, date_col, date_str, name_col,
                                        entity_name)
             return row
+
+    def apply_day_borders(self, tab_name):
+        """Draw the day-separator line above every row whose date differs
+        from the row above it. Idempotent; run at startup to fix rows that
+        were created before the bot drew these borders itself.
+        """
+        with self._write_lock:
+            date_col = self._col_index(tab_name, self._s["date_header"])
+            width = len(self._headers(tab_name))
+            rows = []
+            prev_date = None
+            for idx, row in enumerate(self._all_values(tab_name), start=1):
+                if idx == 1:
+                    continue
+                d = row[date_col - 1].strip() if len(row) >= date_col else ""
+                if not d:
+                    break
+                if prev_date is not None and d != prev_date:
+                    rows.append(idx)
+                prev_date = d
+            self._draw_day_borders(tab_name, rows, width)
+            logger.info("Day borders applied in %r above rows %s", tab_name, rows)
 
     # -- poll_id -> metadata log (survives a redeploy on hosts with no -----
     # -- persistent disk, e.g. Render's free tier, unlike local SQLite) ----

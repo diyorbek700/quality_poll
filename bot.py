@@ -198,6 +198,12 @@ async def run(send_now=False, close_now=False, check_only=False):
             "until they're resent"
         )
 
+    for tab in (cfg["sheets"]["projects_tab"], cfg["sheets"]["partners_tab"]):
+        try:
+            sheets.apply_day_borders(tab)
+        except Exception:
+            logger.exception("Could not apply day borders in %r", tab)
+
     bot = Bot(token)
     me = await bot.get_me()
     logger.info("Authorized as @%s (id=%s)", me.username, me.id)
