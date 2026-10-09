@@ -1,8 +1,11 @@
 """Poll creation, sending, closing, and the poll_answer -> sheet router.
 
-The module keeps a few globals wired up by :func:`configure` (bot, sheets
-client, config, timezone) so both the scheduler jobs and the aiogram handler
-can reach them.
+The module keeps a few globals wired up by :func:`configure` (bot, one sheets
+client per organization, config, timezone) so both the scheduler jobs and the
+aiogram handler can reach them.
+
+Each organization has its own groups, voter_map and spreadsheet. A poll is
+routed back to its organization through the chat_id it was sent to.
 """
 
 import asyncio
@@ -27,17 +30,22 @@ logger = logging.getLogger("qpoll.polls")
 router = Router()
 
 _BOT = None
-_SHEETS = None
+_SHEETS = None  # org key -> SheetsClient
 _CFG = None
 _TZ = None
 
 
-def configure(bot, sheets_client, config):
+def configure(bot, sheets_by_org, config):
     global _BOT, _SHEETS, _CFG, _TZ
     _BOT = bot
-    _SHEETS = sheets_client
+    _SHEETS = sheets_by_org
     _CFG = config
     _TZ = ZoneInfo(config["schedule"]["timezone"])
+
+
+def _org_key_for_chat(chat_id):
+    """The organization a group belongs to, or None if it is not configured."""
+    return _CFG["_chat_org"].get(str(chat_id))
 
 
 def _today_str():
@@ -98,8 +106,9 @@ async def _send_one_poll(chat_id, question, meta_extra):
     }
     meta.update(meta_extra)
     storage.save_poll(meta)
+    sheets = _SHEETS[_org_key_for_chat(chat_id)]
     try:
-        await asyncio.to_thread(_SHEETS.append_poll_log, meta)
+        await asyncio.to_thread(sheets.append_poll_log, meta)
     except Exception:
         logger.exception(
             "Failed to append poll_id=%s to the sheet-backed poll log -- it "
@@ -132,10 +141,10 @@ async def cmd_start(message: Message):
                 user.id, user.full_name, user.username)
 
 
-async def _ensure_row(tab, name_header, entity_name, day):
+async def _ensure_row(sheets, tab, name_header, entity_name, day):
     try:
         await asyncio.to_thread(
-            _SHEETS.ensure_row, tab, name_header, entity_name, day
+            sheets.ensure_row, tab, name_header, entity_name, day
         )
     except Exception:
         logger.exception(
@@ -145,56 +154,68 @@ async def _ensure_row(tab, name_header, entity_name, day):
 
 
 async def send_daily_polls():
-    """Send the 6 polls (1 own-service + 5 partner) to every configured group.
+    """Send the 6 polls (1 own-service + 5 partner) to every configured group
+    of every organization.
 
     Also proactively lays down today's row for every project and partner in
-    the sheet (blank, average formula only) right away, instead of waiting
-    for the first vote to create it -- so today's date shows up for
-    everyone even before anyone has voted, matching how the sheet was kept
-    before this bot existed.
+    each organization's sheet (blank, average formula only) right away,
+    instead of waiting for the first vote to create it -- so today's date
+    shows up for everyone even before anyone has voted, matching how the
+    sheet was kept before this bot existed.
     """
     day = _today_str()
     logger.info("=== Daily poll run for %s ===", day)
     sent = 0
-    for chat_id_str, group in _CFG["groups"].items():
-        chat_id = int(chat_id_str)
+    expected = 0
+    for org_key, sheets in _SHEETS.items():
+        groups = _CFG["organizations"][org_key]["groups"]
+        expected += len(groups) * (1 + len(_CFG["partners"]))
+        for chat_id_str, group in groups.items():
+            chat_id = int(chat_id_str)
 
-        own_q = "%s\n\n%s" % (
-            group["own_service_question"],
-            _CFG["own_service_description"],
-        )
-        if await _send_one_poll(chat_id, own_q, {
-            "poll_type": "own_service",
-            "group_label": group["group_label"],
-            "project_name": group["project_name"],
-        }):
-            sent += 1
-        await _ensure_row(_CFG["sheets"]["projects_tab"],
-                          _CFG["sheets"]["project_name_header"],
-                          group["project_name"], day)
-
-        for partner in _CFG["partners"]:
-            if await _send_one_poll(chat_id, _partner_question(partner), {
-                "poll_type": "partner",
+            own_q = "%s\n\n%s" % (
+                group["own_service_question"],
+                _CFG["own_service_description"],
+            )
+            if await _send_one_poll(chat_id, own_q, {
+                "poll_type": "own_service",
                 "group_label": group["group_label"],
-                "partner_key": partner["key"],
-                "partner_sheet_name": partner["sheet_name"],
+                "project_name": group["project_name"],
             }):
                 sent += 1
+            await _ensure_row(sheets, _CFG["sheets"]["projects_tab"],
+                              _CFG["sheets"]["project_name_header"],
+                              group["project_name"], day)
 
-    for partner in _CFG["partners"]:
-        await _ensure_row(_CFG["sheets"]["partners_tab"],
-                          _CFG["sheets"]["partner_name_header"],
-                          partner["sheet_name"], day)
+            for partner in _CFG["partners"]:
+                if await _send_one_poll(chat_id, _partner_question(partner), {
+                    "poll_type": "partner",
+                    "group_label": group["group_label"],
+                    "partner_key": partner["key"],
+                    "partner_sheet_name": partner["sheet_name"],
+                }):
+                    sent += 1
 
-    logger.info("Daily poll run finished: %d/%d polls sent",
-                sent, len(_CFG["groups"]) * (1 + len(_CFG["partners"])))
+        for partner in _CFG["partners"]:
+            await _ensure_row(sheets, _CFG["sheets"]["partners_tab"],
+                              _CFG["sheets"]["partner_name_header"],
+                              partner["sheet_name"], day)
+
+    logger.info("Daily poll run finished: %d/%d polls sent", sent, expected)
 
 
-async def _mark_closed(poll_id):
+async def _mark_closed(poll_id, chat_id):
     storage.mark_closed(poll_id)
+    sheets = _SHEETS.get(_org_key_for_chat(chat_id))
+    if sheets is None:
+        logger.warning(
+            "poll_id=%s was sent to chat %s, which is no longer in "
+            "config.json -- not marking it closed in any poll log",
+            poll_id, chat_id,
+        )
+        return
     try:
-        await asyncio.to_thread(_SHEETS.mark_poll_log_closed, poll_id)
+        await asyncio.to_thread(sheets.mark_poll_log_closed, poll_id)
     except Exception:
         logger.exception(
             "Failed to mark poll_id=%s closed in the sheet-backed poll log",
@@ -213,13 +234,13 @@ async def close_daily_polls():
     for p in polls:
         try:
             await _BOT.stop_poll(p["chat_id"], p["message_id"])
-            await _mark_closed(p["poll_id"])
+            await _mark_closed(p["poll_id"], p["chat_id"])
             logger.info("Closed poll_id=%s (%s)", p["poll_id"],
                         p.get("partner_key") or p.get("project_name"))
         except TelegramBadRequest as e:
             # Already closed, message deleted, etc. – not fatal.
             logger.warning("Could not stop poll_id=%s: %s", p["poll_id"], e)
-            await _mark_closed(p["poll_id"])
+            await _mark_closed(p["poll_id"], p["chat_id"])
         except TelegramForbiddenError as e:
             logger.warning("Not allowed to stop poll_id=%s: %s", p["poll_id"], e)
 
@@ -236,12 +257,13 @@ async def on_my_chat_member(event: ChatMemberUpdated):
     """
     chat = event.chat
     new_status = event.new_chat_member.status
-    configured = str(chat.id) in _CFG["groups"]
+    org_key = _org_key_for_chat(chat.id)
     logger.info(
         "my_chat_member: chat_id=%s title=%r type=%s -> bot is now '%s'%s",
         chat.id, chat.title, chat.type, new_status,
-        "  [in config.json]" if configured else "  [NOT in config.json – "
-        "add this chat_id to the 'groups' section to send polls here]",
+        "  [in config.json, org %s]" % org_key if org_key else
+        "  [NOT in config.json – add this chat_id to an organization's "
+        "'groups' section to send polls here]",
     )
 
 
@@ -249,22 +271,35 @@ async def on_my_chat_member(event: ChatMemberUpdated):
 async def cmd_chatid(message: Message):
     """Reply with the current chat's numeric id (use inside the group)."""
     chat = message.chat
-    configured = str(chat.id) in _CFG["groups"]
+    org_key = _org_key_for_chat(chat.id)
     await message.reply(
         "chat_id: %s\ntype: %s\ntitle: %s\nin config.json: %s"
-        % (chat.id, chat.type, chat.title, "yes" if configured else "no")
+        % (chat.id, chat.type, chat.title,
+           "yes (%s)" % org_key if org_key else "no")
     )
-    logger.info("/chatid in chat_id=%s title=%r type=%s configured=%s",
-                chat.id, chat.title, chat.type, configured)
+    logger.info("/chatid in chat_id=%s title=%r type=%s org=%s",
+                chat.id, chat.title, chat.type, org_key)
+
+
+def _voter_column(org_key, user_id):
+    """The voter's sheet column in that organization, or None."""
+    return _CFG["organizations"][org_key]["voter_map"].get(str(user_id))
 
 
 @router.message(Command("myid"))
 async def cmd_myid(message: Message):
     """Reply with the sender's numeric user_id, to help fill voter_map.
     Have each voter send /myid once (in the group or in a DM to the bot).
+    Inside a configured group it checks that group's organization; in a DM
+    it lists every organization the user is mapped in.
     """
     user = message.from_user
-    mapped = _CFG["voter_map"].get(str(user.id))
+    org_key = _org_key_for_chat(message.chat.id)
+    org_keys = [org_key] if org_key else list(_CFG["organizations"])
+    mapped = ", ".join(
+        "%s (%s)" % (_voter_column(k, user.id), k)
+        for k in org_keys if _voter_column(k, user.id)
+    )
     await message.reply(
         "user_id: %s\nname: %s\nusername: @%s\nin voter_map: %s"
         % (user.id, user.full_name, user.username or "-", mapped or "no")
@@ -299,13 +334,24 @@ async def on_poll_answer(poll_answer: PollAnswer):
         )
         return
 
-    column_name = _CFG["voter_map"].get(str(user_id))
+    org_key = _org_key_for_chat(meta["chat_id"])
+    sheets = _SHEETS.get(org_key)
+    if sheets is None:
+        logger.warning(
+            "poll_answer on poll_id=%s from user %s (@%s): its chat %s is no "
+            "longer in config.json – ignoring",
+            poll_id, user_id, username, meta["chat_id"],
+        )
+        return
+
+    column_name = _voter_column(org_key, user_id)
     if not column_name:
         logger.warning(
             "Unmapped voter: user_id=%s (@%s) name=%r voted on poll_id=%s "
-            "(%s) – add them to config.json voter_map; skipping",
+            "(%s) – add them to config.json organizations.%s.voter_map; "
+            "skipping",
             user_id, username, user.full_name, poll_id,
-            meta.get("partner_key") or meta.get("project_name"),
+            meta.get("partner_key") or meta.get("project_name"), org_key,
         )
         return
 
@@ -350,7 +396,7 @@ async def on_poll_answer(poll_answer: PollAnswer):
 
     try:
         await asyncio.to_thread(
-            _SHEETS.record_score,
+            sheets.record_score,
             tab, name_header, entity_name, meta["date"], column_name, value,
         )
     except SheetColumnMissing as e:
@@ -367,7 +413,7 @@ async def on_poll_answer(poll_answer: PollAnswer):
 
     storage.record_vote(poll_id, user_id, value)
     logger.info(
-        "Recorded %s=%s in tab %r for [%s / %s]",
-        column_name, "cleared" if value is None else value, tab,
+        "Recorded %s=%s in [%s] tab %r for [%s / %s]",
+        column_name, "cleared" if value is None else value, org_key, tab,
         meta["date"], entity_name,
     )

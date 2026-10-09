@@ -5,16 +5,52 @@
   "close_polls_enabled": false,
   "close_time": "19:00"
 },
-  "groups": {
-    "-1003839803851": {
-      "project_name": "Fortuna Nasiya",
-      "group_label": "Nasiya",
-      "own_service_question": "Bugungu kun holatiga Nasiya platformasi xizmatini baholang"
+  "organizations": {
+    "fortuna": {
+      "name": "Fortuna",
+      "sheet_id_env": "GOOGLE_SHEET_ID",
+      "groups": {
+        "-1003839803851": {
+          "project_name": "Fortuna Nasiya",
+          "group_label": "Nasiya",
+          "own_service_question": "Bugungi kun holatiga Nasiya platformasi xizmatini baholang"
+        },
+        "-1002168129968": {
+          "project_name": "Кредитный Конвейер",
+          "group_label": "Konveyer",
+          "own_service_question": "Bugungi kun holatiga Kredit Konveyer platformasi xizmatini baholang"
+        }
+      },
+      "voter_map": {
+        "300914436": "Bobur",
+        "6369616922": "Olimovv",
+        "1123329711": "Muzaffar",
+        "5886414617": "SABR",
+        "8464035629": "BirZum Admin",
+        "104037207": "Ulugbek",
+        "2039994421": "Farhod"
+      }
     },
-    "-1002168129968": {
-      "project_name": "Кредитный Конвейер",
-      "group_label": "Konveyer",
-      "own_service_question": "Bugungu kun holatiga Kredit Konveyer platformasi xizmatini baholang"
+    "vodiy": {
+      "name": "Vodiy Taraqqiyot",
+      "sheet_id_env": "GOOGLE_SHEET_ID_VODIY",
+      "groups": {
+        "-1004323014150": {
+                 "project_name": "Vodiy Nasiya",
+          "group_label": "Nasiya",
+          "own_service_question": "Bugungi kun holatiga Nasiya platformasi xizmatini baholang"
+        },
+         "-4742177045": {
+                 "project_name": "Кредитный Конвейер",
+          "group_label": "Konveyer",
+          "own_service_question": "Bugungi kun holatiga Nasiya platformasi xizmatini baholang"
+        }
+      },
+      "voter_map": {
+        "5332328853": "Birzum nasiya",
+        "298003454": "Asror",
+        "893740968": "Iskandar Maxsidalizoda"
+      }
     }
   },
   "own_service_description": "Iltimos tanlagan bahoingizga izoh qoldiring",
@@ -46,14 +82,5 @@
     "average_header": "Средняя оценка",
     "add_average_formula_on_new_row": true,
     "poll_log_tab": "PollLog"
-  },
-  "voter_map": {
-    "300914436": "Bobur",
-    "6369616922": "Olimovv",
-    "1123329711": "Muzaffar",
-    "5886414617": "SABR",
-    "8464035629": "BirZum Admin",
-    "104037207": "Ulugbek",
-    "2039994421": "Farhod"
   }
 }

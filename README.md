@@ -1,7 +1,47 @@
 # Quality-assessment poll bot
 
-A Telegram bot (aiogram) that sends daily quality-assessment polls to two
-Telegram groups and records the votes into a Google Sheet with two tabs.
+A Telegram bot (aiogram) that sends daily quality-assessment polls to the
+Telegram groups of one or more organizations and records each organization's
+votes into its own Google Sheet with two tabs.
+
+## Organizations
+
+`config.json` → `organizations` holds one entry per organization. Each has:
+
+| Key | Meaning |
+|-----|---------|
+| `name` | human-readable name (logs only) |
+| `sheet_id_env` | the env var holding this organization's spreadsheet id |
+| `groups` | its Telegram groups (`chat_id` → `project_name` / `group_label` / `own_service_question`) |
+| `voter_map` | its voters (`user_id` → column header in *its* spreadsheet) |
+
+Partners, poll options, tab/header names and the schedule are shared by every
+organization. Each spreadsheet needs the same two tabs and headers, and gets
+its own `PollLog` tab. A vote is routed to the right spreadsheet and
+`voter_map` through the chat the poll was sent to, so a group may belong to
+only one organization. An organization with empty `groups` is skipped
+entirely (its `sheet_id_env` needn't be set yet).
+
+### Connecting a new organization (e.g. `vodiy`)
+
+1. Create its spreadsheet with both tabs (`Оценка эффективности проектов`,
+   `Оценка эффективности Сторонних Сервисов`). Row 1 must be
+   `Дата | Проект` (or `Сервис`) `| <one column per voter> | Средняя оценка`.
+   Share it with the service account's email as an Editor.
+2. Set its id in the env var named by `sheet_id_env`
+   (`GOOGLE_SHEET_ID_VODIY`): in `.env` locally, and under **Environment** on Render.
+3. Add the bot to each of its groups as an admin. Send `/chatid` in each group
+   and put the ids under `organizations.vodiy.groups`, for example:
+   ```json
+   "-100...": {
+     "project_name": "Vodiy Nasiya",
+     "group_label": "Vodiy Nasiya",
+     "own_service_question": "Bugungi kun holatiga Vodiy Nasiya platformasi xizmatini baholang"
+   }
+   ```
+4. Each voter DMs the bot `/start`, then `/myid`. Add them to
+   `organizations.vodiy.voter_map` using their exact column header.
+5. Run `python bot.py --check`, then `python bot.py --send-now` once to test.
 
 ## What it does
 
@@ -55,7 +95,7 @@ existing rows (a new row gets a fresh `AVERAGE` formula on creation if
 | `sheets.py` | Google Sheets client: header lookup, find-row / append-row / update-cell, retry/backoff |
 | `storage.py` | SQLite: `poll_id → metadata` map (survives restart) + last vote per user |
 | `webserver.py` | tiny HTTP server (`/`, `/healthz`), only started when `$PORT` is set — see "Deploying to Render (free)" |
-| `config.json` | groups, partners, poll options, schedule, sheet header names, `voter_map` |
+| `config.json` | organizations (groups, `voter_map`, sheet id env var), partners, poll options, schedule, sheet header names |
 | `.env` / `.env.example` | secrets (token, sheet id, credentials path or JSON) |
 | `requirements.txt` | dependencies |
 | `render.yaml` | Render Blueprint for a one-click free Web Service deploy |
@@ -116,8 +156,9 @@ cp .env.example .env
 # edit .env: TELEGRAM_BOT_TOKEN, GOOGLE_SHEET_ID, GOOGLE_CREDENTIALS_PATH
 ```
 
-Fill in `config.json` → `voter_map`: map each voter's **numeric Telegram
-user_id** (string key) to the **exact column header** used in the sheets:
+Fill in each organization's `config.json` → `organizations.<org>.voter_map`:
+map each voter's **numeric Telegram user_id** (string key) to the **exact
+column header** used in that organization's sheets:
 
 ```json
 "voter_map": {

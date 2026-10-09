@@ -56,12 +56,30 @@ def load_config():
     with open(BASE / "config.json", encoding="utf-8") as f:
         cfg = json.load(f)
     # minimal validation
-    for key in ("schedule", "groups", "partners", "poll_options", "sheets"):
+    for key in ("schedule", "organizations", "partners", "poll_options",
+                "sheets"):
         if key not in cfg:
             raise SystemExit("config.json is missing the %r section" % key)
     if len(cfg["poll_options"]) != 10:
         logger.warning("Expected 10 poll options, found %d",
                        len(cfg["poll_options"]))
+
+    # chat_id -> org key. Every poll is routed back to its organization (its
+    # spreadsheet and voter_map) through the chat it was sent to, so a group
+    # may belong to only one organization.
+    chat_org = {}
+    for org_key, org in cfg["organizations"].items():
+        for key in ("sheet_id_env", "groups", "voter_map"):
+            if key not in org:
+                raise SystemExit("config.json organizations.%s is missing %r"
+                                 % (org_key, key))
+        for cid in org["groups"]:
+            if cid in chat_org:
+                raise SystemExit(
+                    "config.json: chat_id %s is listed under both %r and %r"
+                    % (cid, chat_org[cid], org_key))
+            chat_org[cid] = org_key
+    cfg["_chat_org"] = chat_org
     return cfg
 
 
@@ -79,8 +97,9 @@ async def check_groups(bot, cfg):
     """Verify the bot can reach every configured group and may post polls."""
     me = await bot.get_me()
     all_ok = True
-    for cid, g in cfg["groups"].items():
-        label = g.get("group_label", "?")
+    for cid, org_key in cfg["_chat_org"].items():
+        g = cfg["organizations"][org_key]["groups"][cid]
+        label = "%s/%s" % (org_key, g.get("group_label", "?"))
         try:
             chat = await bot.get_chat(int(cid))
         except Exception as e:
@@ -89,7 +108,7 @@ async def check_groups(bot, cfg):
                 "[%s] chat_id=%s UNREACHABLE: %s – add @%s to that group as an "
                 "admin; the bot logs the real chat_id on join (my_chat_member) "
                 "and also answers /chatid inside the group. Put that id in "
-                "config.json -> groups.",
+                "config.json -> organizations -> <org> -> groups.",
                 label, cid, e, me.username)
             continue
         try:
@@ -182,27 +201,37 @@ async def run(send_now=False, close_now=False, check_only=False):
             await bot.session.close()
         return
 
-    sheet_id = require_env("GOOGLE_SHEET_ID")
     creds_kwargs = resolve_google_credentials()
 
     storage.init_db()
 
-    sheets = SheetsClient(sheet_id, cfg, **creds_kwargs)
+    # One spreadsheet per organization. An organization with no groups yet
+    # (still being set up) is skipped, so its sheet id env var may be unset.
+    sheets_by_org = {}
+    for org_key, org in cfg["organizations"].items():
+        if not org["groups"]:
+            logger.info("[%s] no groups configured yet -- skipping", org_key)
+            continue
+        sheet_id = require_env(org["sheet_id_env"])
+        sheets = SheetsClient(sheet_id, cfg, **creds_kwargs)
+        sheets_by_org[org_key] = sheets
 
-    try:
-        storage.import_poll_log(sheets.load_poll_log())
-    except Exception:
-        logger.exception(
-            "Could not import the sheet-backed poll log -- votes on polls "
-            "sent by a previous instance may be routed as 'unknown poll_id' "
-            "until they're resent"
-        )
-
-    for tab in (cfg["sheets"]["projects_tab"], cfg["sheets"]["partners_tab"]):
         try:
-            sheets.apply_day_borders(tab)
+            storage.import_poll_log(sheets.load_poll_log())
         except Exception:
-            logger.exception("Could not apply day borders in %r", tab)
+            logger.exception(
+                "[%s] Could not import the sheet-backed poll log -- votes on "
+                "polls sent by a previous instance may be routed as 'unknown "
+                "poll_id' until they're resent", org_key,
+            )
+
+        for tab in (cfg["sheets"]["projects_tab"],
+                    cfg["sheets"]["partners_tab"]):
+            try:
+                sheets.apply_day_borders(tab)
+            except Exception:
+                logger.exception("[%s] Could not apply day borders in %r",
+                                 org_key, tab)
 
     bot = Bot(token)
     me = await bot.get_me()
@@ -210,7 +239,7 @@ async def run(send_now=False, close_now=False, check_only=False):
 
     dp = Dispatcher()
     dp.include_router(polls.router)
-    polls.configure(bot, sheets, cfg)
+    polls.configure(bot, sheets_by_org, cfg)
 
     tz = ZoneInfo(cfg["schedule"]["timezone"])
     scheduler = AsyncIOScheduler(timezone=tz)

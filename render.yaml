@@ -21,5 +21,7 @@ services:
         sync: false
       - key: GOOGLE_SHEET_ID
         sync: false
+      - key: GOOGLE_SHEET_ID_VODIY
+        sync: false
       - key: GOOGLE_CREDENTIALS_JSON
         sync: false
