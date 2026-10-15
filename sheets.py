@@ -34,19 +34,27 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 _LEADING_NUMBER = re.compile(r"\d+")
 
-# Score colours: 1-3 red, 4-6 yellow, 7-10 green (Google Sheets' own light
-# red / yellow / green 3), judged on the score rounded to the nearest whole
-# number -- so an average of 6.3 is yellow, 6.6 is green, 3.4 red, 3.5
-# yellow. Applied as conditional formatting, so they also follow scores
-# typed in by hand. ``{c}`` is the top-left cell of the range; Sheets shifts
-# it for every other cell.
+def _hex_color(hex_str):
+    """"EA4335" -> {"red": 0.918, "green": 0.263, "blue": 0.208}"""
+    r, g, b = (int(hex_str[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return {"red": r, "green": g, "blue": b}
+
+
+_WHITE = _hex_color("FFFFFF")
+_BLACK = _hex_color("000000")
+
+# Score colours: 1-3 red, 4-6 yellow, 7-10 green (the theme's EA4335 /
+# FBBC04 / 34A853, white text on red and green so the number stays
+# readable), judged on the score rounded to the nearest whole number -- so
+# an average of 6.3 is yellow, 6.6 is green, 3.4 red, 3.5 yellow. Applied as
+# conditional formatting, so they also follow scores typed in by hand.
+# ``{c}`` is the top-left cell of the range; Sheets shifts it for every
+# other cell.
 _SCORE_COLOR_RULES = [
-    ("=AND(ISNUMBER({c}),ROUND({c})<4)",
-     {"red": 0.957, "green": 0.8, "blue": 0.8}),
+    ("=AND(ISNUMBER({c}),ROUND({c})<4)", _hex_color("EA4335"), _WHITE),
     ("=AND(ISNUMBER({c}),ROUND({c})>=4,ROUND({c})<7)",
-     {"red": 1.0, "green": 0.949, "blue": 0.8}),
-    ("=AND(ISNUMBER({c}),ROUND({c})>=7)",
-     {"red": 0.851, "green": 0.918, "blue": 0.827}),
+     _hex_color("FBBC04"), _BLACK),
+    ("=AND(ISNUMBER({c}),ROUND({c})>=7)", _hex_color("34A853"), _WHITE),
 ]
 # Recognises the rules above (whatever column they start at), so a restart
 # replaces them instead of stacking duplicates.
@@ -344,7 +352,8 @@ class SheetsClient:
     @_retry
     def apply_score_colors(self, tab_name, name_header):
         """(Re)apply the red / yellow / green conditional formatting to every
-        score column of ``tab_name`` -- the voter columns and the average.
+        score column of ``tab_name`` -- the voter columns and the average --
+        and centre the scores in their cells.
         Idempotent: rules this method added before are replaced, so new voter
         columns are picked up on the next restart.
         """
@@ -384,7 +393,19 @@ class SheetsClient:
             "startColumnIndex": first_col - 1,
             "endColumnIndex": last_col,
         }
-        for index, (formula, color) in enumerate(_SCORE_COLOR_RULES):
+        # Scores sit in the middle of their cells.
+        requests.append({
+            "repeatCell": {
+                "range": score_range,
+                "cell": {"userEnteredFormat": {
+                    "horizontalAlignment": "CENTER",
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(horizontalAlignment,"
+                          "verticalAlignment)",
+            }
+        })
+        for index, (formula, color, text_color) in enumerate(_SCORE_COLOR_RULES):
             requests.append({
                 "addConditionalFormatRule": {
                     "index": index,
@@ -396,7 +417,10 @@ class SheetsClient:
                                 "values": [{"userEnteredValue":
                                             formula.format(c=top_left)}],
                             },
-                            "format": {"backgroundColor": color},
+                            "format": {
+                                "backgroundColor": color,
+                                "textFormat": {"foregroundColor": text_color},
+                            },
                         },
                     },
                 }
