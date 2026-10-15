@@ -225,12 +225,19 @@ async def run(send_now=False, close_now=False, check_only=False):
                 "poll_id' until they're resent", org_key,
             )
 
-        for tab in (cfg["sheets"]["projects_tab"],
-                    cfg["sheets"]["partners_tab"]):
+        for tab, name_header in (
+            (cfg["sheets"]["projects_tab"], cfg["sheets"]["project_name_header"]),
+            (cfg["sheets"]["partners_tab"], cfg["sheets"]["partner_name_header"]),
+        ):
             try:
                 sheets.apply_day_borders(tab)
             except Exception:
                 logger.exception("[%s] Could not apply day borders in %r",
+                                 org_key, tab)
+            try:
+                sheets.apply_score_colors(tab, name_header)
+            except Exception:
+                logger.exception("[%s] Could not apply score colours in %r",
                                  org_key, tab)
 
     bot = Bot(token)

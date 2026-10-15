@@ -19,7 +19,8 @@ import threading
 
 import gspread
 from google.oauth2.service_account import Credentials
-from gspread.utils import rowcol_to_a1
+from gspread.cell import Cell
+from gspread.utils import ValueInputOption, rowcol_to_a1
 from tenacity import (
     retry,
     retry_if_exception,
@@ -32,6 +33,27 @@ logger = logging.getLogger("qpoll.sheets")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 _LEADING_NUMBER = re.compile(r"\d+")
+
+# Score colours: 1-3 red, 4-6 yellow, 7-10 green (Google Sheets' own light
+# red / yellow / green 3), judged on the score rounded to the nearest whole
+# number -- so an average of 6.3 is yellow, 6.6 is green, 3.4 red, 3.5
+# yellow. Applied as conditional formatting, so they also follow scores
+# typed in by hand. ``{c}`` is the top-left cell of the range; Sheets shifts
+# it for every other cell.
+_SCORE_COLOR_RULES = [
+    ("=AND(ISNUMBER({c}),ROUND({c})<4)",
+     {"red": 0.957, "green": 0.8, "blue": 0.8}),
+    ("=AND(ISNUMBER({c}),ROUND({c})>=4,ROUND({c})<7)",
+     {"red": 1.0, "green": 0.949, "blue": 0.8}),
+    ("=AND(ISNUMBER({c}),ROUND({c})>=7)",
+     {"red": 0.851, "green": 0.918, "blue": 0.827}),
+]
+# Recognises the rules above (whatever column they start at), so a restart
+# replaces them instead of stacking duplicates.
+_SCORE_COLOR_FORMULA = re.compile(
+    r"^=AND\(ISNUMBER\(([A-Z]+2)\),"
+    r"ROUND\(\1\)(<4|>=4,ROUND\(\1\)<7|>=7)\)$"
+)
 
 
 class SheetColumnMissing(Exception):
@@ -125,6 +147,12 @@ class SheetsClient:
     @_retry
     def _update_cell(self, tab_name, row, col, value):
         self._worksheet(tab_name).update_cell(row, col, value)
+
+    @_retry
+    def _update_cells(self, tab_name, cells):
+        self._worksheet(tab_name).update_cells(
+            cells, value_input_option=ValueInputOption.user_entered
+        )
 
     @_retry
     def _append_row(self, tab_name, values):
@@ -277,6 +305,106 @@ class SheetsClient:
                 row = self._create_row(tab_name, date_col, date_str, name_col,
                                        entity_name)
             return row
+
+    def fill_empty_scores(self, tab_name, name_header, entity_name, date_str,
+                          column_names, value):
+        """Write ``value`` into every one of ``column_names`` that is still
+        empty in the (``date_str``, ``entity_name``) row, creating the row if
+        needed. Cells that already hold a score are left alone. Returns the
+        column names that were filled.
+        """
+        with self._write_lock:
+            date_col = self._col_index(tab_name, self._s["date_header"])
+            name_col = self._col_index(tab_name, name_header)
+            row = self._find_row(tab_name, date_col, date_str, name_col,
+                                 entity_name)
+            if row is None:
+                row = self._create_row(tab_name, date_col, date_str, name_col,
+                                       entity_name)
+            current = self._all_values(tab_name)[row - 1]
+
+            cells, filled = [], []
+            for column_name in column_names:
+                col = self._col_index(tab_name, column_name, required=False)
+                if col is None:
+                    logger.warning("Column %r not found in tab %r -- not "
+                                   "filling it", column_name, tab_name)
+                    continue
+                existing = current[col - 1].strip() if len(current) >= col else ""
+                if existing:
+                    continue
+                cells.append(Cell(row, col, value))
+                filled.append(column_name)
+            if cells:
+                self._update_cells(tab_name, cells)
+            logger.info("Filled empty scores in %r [%s / %s] with %r: %s",
+                        tab_name, date_str, entity_name, value, filled or "none")
+            return filled
+
+    @_retry
+    def apply_score_colors(self, tab_name, name_header):
+        """(Re)apply the red / yellow / green conditional formatting to every
+        score column of ``tab_name`` -- the voter columns and the average.
+        Idempotent: rules this method added before are replaced, so new voter
+        columns are picked up on the next restart.
+        """
+        ws = self._worksheet(tab_name)
+        headers = self._headers(tab_name, refresh=True)
+        first_col = self._col_index(tab_name, name_header) + 1
+        last_col = len(headers)
+        if last_col < first_col:
+            logger.warning("No score columns in %r -- skipping colours",
+                           tab_name)
+            return
+
+        meta = self._sh.fetch_sheet_metadata(
+            {"fields": "sheets(properties.sheetId,conditionalFormats)"}
+        )
+        existing = next(
+            (s.get("conditionalFormats", []) for s in meta["sheets"]
+             if s["properties"]["sheetId"] == ws.id),
+            [],
+        )
+        ours = [
+            i for i, rule in enumerate(existing)
+            if _SCORE_COLOR_FORMULA.match(
+                (rule.get("booleanRule", {}).get("condition", {})
+                 .get("values") or [{}])[0].get("userEnteredValue", "")
+            )
+        ]
+
+        requests = [
+            {"deleteConditionalFormatRule": {"sheetId": ws.id, "index": i}}
+            for i in sorted(ours, reverse=True)
+        ]
+        top_left = rowcol_to_a1(2, first_col)
+        score_range = {
+            "sheetId": ws.id,
+            "startRowIndex": 1,
+            "startColumnIndex": first_col - 1,
+            "endColumnIndex": last_col,
+        }
+        for index, (formula, color) in enumerate(_SCORE_COLOR_RULES):
+            requests.append({
+                "addConditionalFormatRule": {
+                    "index": index,
+                    "rule": {
+                        "ranges": [score_range],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "CUSTOM_FORMULA",
+                                "values": [{"userEnteredValue":
+                                            formula.format(c=top_left)}],
+                            },
+                            "format": {"backgroundColor": color},
+                        },
+                    },
+                }
+            })
+        self._sh.batch_update({"requests": requests})
+        logger.info("Score colours applied in %r to columns %s:%s",
+                    tab_name, rowcol_to_a1(1, first_col)[:-1],
+                    rowcol_to_a1(1, last_col)[:-1])
 
     def apply_day_borders(self, tab_name):
         """Draw the day-separator line above every row whose date differs

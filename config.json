@@ -53,7 +53,12 @@
       }
     }
   },
-  "own_service_description": "Iltimos tanlagan bahoingizga izoh qoldiring",
+  "own_service_autofill": {
+    "enabled": true,
+    "after_days": 2,
+    "score": 10
+  },
+  "own_service_description":"Iltimos tanlagan bahoingizga izoh qoldiring",
   "partners": [
     { "key": "KATM", "question_name": "KATM", "sheet_name": "КАТМ" },
     { "key": "EGOV", "question_name": "EGOV", "sheet_name": "ERI" },

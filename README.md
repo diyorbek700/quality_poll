@@ -81,6 +81,21 @@ sent (blank, average formula only) — not only once the first vote comes in —
 so today's date always shows up in the sheet immediately, even before anyone
 has voted.
 
+**No vote on our own product = 10.** `config.json` → `own_service_autofill`
+(`enabled`, `after_days`: 2, `score`: 10). At every daily run the bot looks
+at the own-service polls (Nasiya / Konveyer — never partners) sent
+`after_days` days ago and writes `score` into the still-empty cell of every
+voter from that organization's `voter_map` who is a member of that group.
+Scores already given are never touched, and a late real vote still
+overwrites the 10.
+
+**Score colours.** On startup the bot (re)applies conditional formatting to
+every score column (voters + `Средняя оценка`) of both tabs in every
+organization's sheet: **1–3 red, 4–6 yellow, 7–10 green**. It's conditional
+formatting, so hand-typed scores are coloured too. Fractional averages are
+rounded to the nearest whole number first: 3.4 red, 3.5 yellow, 6.3 yellow,
+6.5 / 6.6 green. New voter columns get coloured after the next restart.
+
 Each voter's score goes into the column whose header matches their name in
 `config.json` → `voter_map`. The `Средняя оценка` column is never written to for
 existing rows (a new row gets a fresh `AVERAGE` formula on creation if

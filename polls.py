@@ -10,7 +10,7 @@ routed back to its organization through the chat_id it was sent to.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
@@ -48,8 +48,9 @@ def _org_key_for_chat(chat_id):
     return _CFG["_chat_org"].get(str(chat_id))
 
 
-def _today_str():
-    return datetime.now(_TZ).strftime("%d-%b-%Y")
+def _today_str(days_ago=0):
+    day = datetime.now(_TZ) - timedelta(days=days_ago)
+    return day.strftime("%d-%b-%Y")
 
 
 def _partner_question(partner):
@@ -202,6 +203,66 @@ async def send_daily_polls():
                               partner["sheet_name"], day)
 
     logger.info("Daily poll run finished: %d/%d polls sent", sent, expected)
+
+    await autofill_missed_own_service_votes()
+
+
+async def _is_group_member(chat_id, user_id):
+    try:
+        member = await _BOT.get_chat_member(chat_id, user_id)
+    except Exception as e:
+        logger.warning("Could not check whether user %s is in chat %s: %s",
+                       user_id, chat_id, e)
+        return False
+    return member.status not in ("left", "kicked")
+
+
+async def autofill_missed_own_service_votes():
+    """Own-service polls (our products, not partners) that a voter left
+    unanswered for ``own_service_autofill.after_days`` days count as a
+    perfect score: write ``own_service_autofill.score`` into their still
+    empty cell. Only voters who are members of that poll's group are filled,
+    and a real vote cast later still overwrites it as usual.
+    """
+    autofill = _CFG.get("own_service_autofill", {})
+    if not autofill.get("enabled"):
+        return
+    after_days = autofill.get("after_days", 2)
+    score = autofill.get("score", 10)
+    day = _today_str(after_days)
+    polls = [p for p in storage.polls_for_date(day)
+             if p["poll_type"] == "own_service"]
+    logger.info("Autofill: %d own-service poll(s) from %s to check",
+                len(polls), day)
+
+    for p in polls:
+        org_key = _org_key_for_chat(p["chat_id"])
+        sheets = _SHEETS.get(org_key)
+        if sheets is None:
+            continue
+        voter_map = _CFG["organizations"][org_key]["voter_map"]
+        columns = {}
+        for user_id, column_name in voter_map.items():
+            if await _is_group_member(p["chat_id"], int(user_id)):
+                columns[column_name] = int(user_id)
+        if not columns:
+            continue
+        try:
+            filled = await asyncio.to_thread(
+                sheets.fill_empty_scores,
+                _CFG["sheets"]["projects_tab"],
+                _CFG["sheets"]["project_name_header"],
+                p["project_name"], day, list(columns), score,
+            )
+        except Exception:
+            logger.exception("Autofill failed for [%s] %s / %s",
+                             org_key, day, p["project_name"])
+            continue
+        for column_name in filled:
+            storage.record_vote(p["poll_id"], columns[column_name], score)
+        logger.info("Autofill [%s] %s / %s: %s set to %s (no vote in %d days)",
+                    org_key, day, p["project_name"], filled or "nobody",
+                    score, after_days)
 
 
 async def _mark_closed(poll_id, chat_id):
