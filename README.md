@@ -22,6 +22,12 @@ its own `PollLog` tab. A vote is routed to the right spreadsheet and
 only one organization. An organization with empty `groups` is skipped
 entirely (its `sheet_id_env` needn't be set yet).
 
+A group can poll more than one of our products: add them under the group's
+`extra_products` (each with its own `project_name` and
+`own_service_question`). Every product is its own own-service poll and its
+own row in the projects tab, e.g. the Fortuna Nasiya group also polls
+`Муробаха`.
+
 ### Connecting a new organization (e.g. `vodiy`)
 
 1. Create its spreadsheet with both tabs (`Оценка эффективности проектов`,

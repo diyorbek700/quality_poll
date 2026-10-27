@@ -13,7 +13,13 @@
         "-1003839803851": {
           "project_name": "Fortuna Nasiya",
           "group_label": "Nasiya",
-          "own_service_question": "Bugungi kun holatiga Nasiya platformasi xizmatini baholang"
+          "own_service_question": "Bugungi kun holatiga Nasiya platformasi xizmatini baholang",
+          "extra_products": [
+            {
+              "project_name": "Муробаха",
+              "own_service_question": "Bugungi kun holatiga Murobaha xizmatini baholang"
+            }
+          ]
         },
         "-1002168129968": {
           "project_name": "Кредитный Конвейер",

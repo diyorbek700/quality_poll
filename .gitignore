@@ -17,6 +17,7 @@ logs/
 __pycache__/
 *.py[cod]
 .venv/
+.venv-win/
 venv/
 env/
 .mypy_cache/

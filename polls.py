@@ -154,8 +154,20 @@ async def _ensure_row(sheets, tab, name_header, entity_name, day):
         )
 
 
+def _group_products(group):
+    """Our own products polled in a group, as (project_name, question): the
+    group's main product first, then any ``extra_products``. Each one is a
+    separate row in the projects tab.
+    """
+    products = [(group["project_name"], group["own_service_question"])]
+    for extra in group.get("extra_products", []):
+        products.append((extra["project_name"], extra["own_service_question"]))
+    return products
+
+
 async def send_daily_polls():
-    """Send the 6 polls (1 own-service + 5 partner) to every configured group
+    """Send the own-service polls (one per product, see _group_products) and
+    the 5 partner polls to every configured group
     of every organization.
 
     Also proactively lays down today's row for every project and partner in
@@ -170,23 +182,23 @@ async def send_daily_polls():
     expected = 0
     for org_key, sheets in _SHEETS.items():
         groups = _CFG["organizations"][org_key]["groups"]
-        expected += len(groups) * (1 + len(_CFG["partners"]))
         for chat_id_str, group in groups.items():
             chat_id = int(chat_id_str)
+            products = _group_products(group)
+            expected += len(products) + len(_CFG["partners"])
 
-            own_q = "%s\n\n%s" % (
-                group["own_service_question"],
-                _CFG["own_service_description"],
-            )
-            if await _send_one_poll(chat_id, own_q, {
-                "poll_type": "own_service",
-                "group_label": group["group_label"],
-                "project_name": group["project_name"],
-            }):
-                sent += 1
-            await _ensure_row(sheets, _CFG["sheets"]["projects_tab"],
-                              _CFG["sheets"]["project_name_header"],
-                              group["project_name"], day)
+            for project_name, question in products:
+                own_q = "%s\n\n%s" % (question,
+                                      _CFG["own_service_description"])
+                if await _send_one_poll(chat_id, own_q, {
+                    "poll_type": "own_service",
+                    "group_label": group["group_label"],
+                    "project_name": project_name,
+                }):
+                    sent += 1
+                await _ensure_row(sheets, _CFG["sheets"]["projects_tab"],
+                                  _CFG["sheets"]["project_name_header"],
+                                  project_name, day)
 
             for partner in _CFG["partners"]:
                 if await _send_one_poll(chat_id, _partner_question(partner), {
