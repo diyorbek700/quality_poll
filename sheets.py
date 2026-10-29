@@ -349,6 +349,12 @@ class SheetsClient:
                         tab_name, date_str, entity_name, value, filled or "none")
             return filled
 
+    def missing_columns(self, tab_name, column_names):
+        """The names from ``column_names`` that have no matching header in
+        ``tab_name`` -- votes from those voters can't be written there."""
+        headers = [h.strip() for h in self._headers(tab_name, refresh=True)]
+        return [n for n in column_names if n.strip() not in headers]
+
     @_retry
     def apply_score_colors(self, tab_name, name_header):
         """(Re)apply the red / yellow / green conditional formatting to every

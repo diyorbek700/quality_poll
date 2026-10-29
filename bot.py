@@ -239,6 +239,19 @@ async def run(send_now=False, close_now=False, check_only=False):
             except Exception:
                 logger.exception("[%s] Could not apply score colours in %r",
                                  org_key, tab)
+            try:
+                missing = sheets.missing_columns(
+                    tab, list(org["voter_map"].values()))
+            except Exception:
+                logger.exception("[%s] Could not check voter columns in %r",
+                                 org_key, tab)
+                missing = []
+            if missing:
+                logger.error(
+                    "[%s] voter_map names with NO matching column in %r: %s "
+                    "-- their votes will NOT be recorded. Make each name in "
+                    "config.json match the sheet header exactly (case "
+                    "included).", org_key, tab, missing)
 
     bot = Bot(token)
     me = await bot.get_me()
