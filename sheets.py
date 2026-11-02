@@ -163,9 +163,19 @@ class SheetsClient:
         )
 
     @_retry
-    def _append_row(self, tab_name, values):
-        self._worksheet(tab_name).append_row(
-            values, value_input_option="USER_ENTERED", table_range="A1"
+    def _write_row(self, tab_name, row, values):
+        """Write ``values`` into row ``row`` (1-based), growing the grid if
+        needed. Used instead of the API's append, which skips rows hidden by
+        a filter when it looks for the end of the table and so kept
+        overwriting the same row in a filtered tab.
+        """
+        ws = self._worksheet(tab_name)
+        if row > ws.row_count:
+            ws.add_rows(row - ws.row_count + 100)
+        ws.update(
+            range_name=rowcol_to_a1(row, 1),
+            values=[values],
+            value_input_option=ValueInputOption.user_entered,
         )
 
     @_retry
@@ -233,6 +243,10 @@ class SheetsClient:
         values[date_col - 1] = date_str
         values[name_col - 1] = name
 
+        # The new row goes right below the last row holding any data.
+        all_values = self._all_values(tab_name)
+        row = len(all_values) + 1
+
         avg_col = self._col_index(
             tab_name, self._s["average_header"], required=False
         )
@@ -240,15 +254,12 @@ class SheetsClient:
             first_person = name_col + 1
             last_person = avg_col - 1
             if last_person >= first_person:
-                new_row_number = len(self._all_values(tab_name)) + 1
-                start = rowcol_to_a1(new_row_number, first_person)
-                end = rowcol_to_a1(new_row_number, last_person)
+                start = rowcol_to_a1(row, first_person)
+                end = rowcol_to_a1(row, last_person)
                 values[avg_col - 1] = "=IFERROR(AVERAGE(%s:%s),\"\")" % (start, end)
 
-        self._append_row(tab_name, values)
-        all_values = self._all_values(tab_name)
-        row = self._find_row(tab_name, date_col, date_str, name_col, name)
-        if row and row > 2:
+        self._write_row(tab_name, row, values)
+        if row > 2:
             prev = all_values[row - 2]
             prev_date = prev[date_col - 1].strip() if len(prev) >= date_col else ""
             if prev_date != date_str:
