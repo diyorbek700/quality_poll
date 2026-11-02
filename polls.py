@@ -387,6 +387,31 @@ async def cmd_myid(message: Message):
 # Receiving votes
 # --------------------------------------------------------------------------
 
+_POLL_LOG_RELOAD_EVERY = 60  # seconds
+_poll_log_reload_lock = asyncio.Lock()
+_poll_log_reloaded_at = None
+
+
+async def _reload_poll_logs():
+    """Re-import every organization's PollLog, to pick up polls this process
+    didn't send itself (e.g. a manual resend for a missed day). Runs at most
+    once a minute; votes arriving during a reload wait for it to finish.
+    """
+    global _poll_log_reloaded_at
+    async with _poll_log_reload_lock:
+        now = asyncio.get_running_loop().time()
+        if (_poll_log_reloaded_at is not None
+                and now - _poll_log_reloaded_at < _POLL_LOG_RELOAD_EVERY):
+            return
+        for org_key, sheets in _SHEETS.items():
+            try:
+                storage.import_poll_log(
+                    await asyncio.to_thread(sheets.load_poll_log))
+            except Exception:
+                logger.exception("[%s] Could not reload the poll log", org_key)
+        _poll_log_reloaded_at = asyncio.get_running_loop().time()
+
+
 @router.poll_answer()
 async def on_poll_answer(poll_answer: PollAnswer):
     poll_id = poll_answer.poll_id
@@ -400,6 +425,9 @@ async def on_poll_answer(poll_answer: PollAnswer):
     username = user.username
 
     meta = storage.get_poll(poll_id)
+    if meta is None:
+        await _reload_poll_logs()
+        meta = storage.get_poll(poll_id)
     if meta is None:
         logger.warning(
             "poll_answer for unknown poll_id=%s from user %s (@%s) – "
