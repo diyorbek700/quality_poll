@@ -17,7 +17,9 @@ from aiogram import F, Router
 from aiogram.exceptions import (
     TelegramBadRequest,
     TelegramForbiddenError,
+    TelegramNetworkError,
     TelegramRetryAfter,
+    TelegramServerError,
 )
 from aiogram.filters import Command, CommandStart
 from aiogram.types import ChatMemberUpdated, InputPollOption, Message, PollAnswer
@@ -64,38 +66,72 @@ def _partner_question(partner):
 # Sending
 # --------------------------------------------------------------------------
 
-async def _send_one_poll(chat_id, question, meta_extra):
-    """Send a single poll and persist its metadata. Never raises for the
-    common 'bot can't post here' cases – logs and returns instead so one bad
-    group does not abort the whole daily run.
+_SEND_ATTEMPTS = 4
+_SEND_BACKOFF = 5  # seconds, doubled after every failed attempt
+
+
+async def _send_poll_message(chat_id, question, group_label):
+    """send_poll with a bounded number of attempts. Returns the message, or
+    None if the poll could not be sent. Never raises, so one failing poll
+    does not abort the rest of the daily run.
+
+    A network error after Telegram already accepted the poll can make the
+    retry post it twice; a duplicate beats a group getting no poll at all.
     """
     options = [InputPollOption(text=o) for o in _CFG["poll_options"]]
-    try:
-        msg = await _BOT.send_poll(
-            chat_id=chat_id,
-            question=question,
-            options=options,
-            is_anonymous=False,
-            allows_multiple_answers=False,
-            is_closed=False,
-        )
-    except TelegramRetryAfter as e:
-        logger.warning("Flood control for chat %s, sleeping %ss", chat_id,
-                       e.retry_after)
-        await asyncio.sleep(e.retry_after)
-        return await _send_one_poll(chat_id, question, meta_extra)
-    except TelegramForbiddenError as e:
-        logger.error(
-            "Cannot post polls in chat %s (%s) – bot blocked/kicked/not a "
-            "member: %s", chat_id, meta_extra.get("group_label"), e,
-        )
-        return None
-    except TelegramBadRequest as e:
-        logger.error(
-            "Cannot post poll in chat %s (%s): %s – check the bot has "
-            "'Send Polls' permission there", chat_id,
-            meta_extra.get("group_label"), e,
-        )
+    delay = _SEND_BACKOFF
+    for attempt in range(1, _SEND_ATTEMPTS + 1):
+        try:
+            return await _BOT.send_poll(
+                chat_id=chat_id,
+                question=question,
+                options=options,
+                is_anonymous=False,
+                allows_multiple_answers=False,
+                is_closed=False,
+            )
+        except TelegramRetryAfter as e:
+            logger.warning("Flood control for chat %s, sleeping %ss",
+                           chat_id, e.retry_after)
+            await asyncio.sleep(e.retry_after)
+            continue
+        except TelegramForbiddenError as e:
+            logger.error(
+                "Cannot post polls in chat %s (%s) – bot blocked/kicked/not "
+                "a member: %s", chat_id, group_label, e,
+            )
+            return None
+        except TelegramBadRequest as e:
+            logger.error(
+                "Cannot post poll in chat %s (%s): %s – check the bot has "
+                "'Send Polls' permission there", chat_id, group_label, e,
+            )
+            return None
+        except (TelegramNetworkError, TelegramServerError,
+                asyncio.TimeoutError) as e:
+            error = e
+        except Exception as e:  # anything unexpected: don't retry
+            logger.exception("Unexpected error sending a poll to chat %s (%s)",
+                             chat_id, group_label)
+            return None
+        if attempt < _SEND_ATTEMPTS:
+            logger.warning(
+                "Sending a poll to chat %s (%s) failed (attempt %d/%d): %s "
+                "– retrying in %ss", chat_id, group_label, attempt,
+                _SEND_ATTEMPTS, error, delay)
+            await asyncio.sleep(delay)
+            delay *= 2
+    logger.error("Giving up on a poll for chat %s (%s) after %d attempts: %s",
+                 chat_id, group_label, _SEND_ATTEMPTS, error)
+    return None
+
+
+async def _send_one_poll(chat_id, question, meta_extra):
+    """Send a single poll and persist its metadata. Returns the metadata, or
+    None if the poll could not be sent."""
+    msg = await _send_poll_message(chat_id, question,
+                                   meta_extra.get("group_label"))
+    if msg is None:
         return None
 
     meta = {
@@ -178,6 +214,17 @@ async def send_daily_polls():
     """
     day = _today_str()
     logger.info("=== Daily poll run for %s ===", day)
+    try:
+        await _send_all_polls(day)
+    except Exception:
+        logger.exception("Daily poll run for %s stopped early", day)
+    try:
+        await autofill_missed_own_service_votes()
+    except Exception:
+        logger.exception("Autofill run failed")
+
+
+async def _send_all_polls(day):
     sent = 0
     expected = 0
     for org_key, sheets in _SHEETS.items():
@@ -216,8 +263,6 @@ async def send_daily_polls():
 
     logger.info("Daily poll run finished: %d/%d polls sent", sent, expected)
 
-    await autofill_missed_own_service_votes()
-
 
 async def _is_group_member(chat_id, user_id):
     try:
@@ -229,24 +274,43 @@ async def _is_group_member(chat_id, user_id):
     return member.status not in ("left", "kicked")
 
 
+def _parse_day(date_str):
+    try:
+        return datetime.strptime(date_str, "%d-%b-%Y").date()
+    except (TypeError, ValueError):
+        return None
+
+
 async def autofill_missed_own_service_votes():
     """Own-service polls (our products, not partners) that a voter left
     unanswered for ``own_service_autofill.after_days`` days count as a
     perfect score: write ``own_service_autofill.score`` into their still
     empty cell. Only voters who are members of that poll's group are filled,
     and a real vote cast later still overwrites it as usual.
+
+    Every overdue poll not autofilled yet is handled, not only the one from
+    exactly ``after_days`` ago, so a day the bot was down is caught up on
+    the next run. Polls older than ``after_days + catch_up_days`` are left
+    alone so a restart (which re-imports the whole poll log) never rewrites
+    old history.
     """
     autofill = _CFG.get("own_service_autofill", {})
     if not autofill.get("enabled"):
         return
     after_days = autofill.get("after_days", 2)
+    catch_up_days = autofill.get("catch_up_days", 7)
     score = autofill.get("score", 10)
-    day = _today_str(after_days)
-    polls = [p for p in storage.polls_for_date(day)
-             if p["poll_type"] == "own_service"]
-    logger.info("Autofill: %d own-service poll(s) from %s to check",
-                len(polls), day)
+    today = datetime.now(_TZ).date()
 
+    polls = []
+    for p in storage.polls_to_autofill():
+        day = _parse_day(p["date"])
+        if day is not None and                 after_days <= (today - day).days <= after_days + catch_up_days:
+            polls.append(p)
+    logger.info("Autofill: %d overdue own-service poll(s) to check",
+                len(polls))
+
+    membership = {}  # (chat_id, user_id) -> bool, one lookup per run
     for p in polls:
         org_key = _org_key_for_chat(p["chat_id"])
         sheets = _SHEETS.get(org_key)
@@ -255,26 +319,33 @@ async def autofill_missed_own_service_votes():
         voter_map = _CFG["organizations"][org_key]["voter_map"]
         columns = {}
         for user_id, column_name in voter_map.items():
-            if await _is_group_member(p["chat_id"], int(user_id)):
-                columns[column_name] = int(user_id)
-        if not columns:
-            continue
-        try:
-            filled = await asyncio.to_thread(
-                sheets.fill_empty_scores,
-                _CFG["sheets"]["projects_tab"],
-                _CFG["sheets"]["project_name_header"],
-                p["project_name"], day, list(columns), score,
-            )
-        except Exception:
-            logger.exception("Autofill failed for [%s] %s / %s",
-                             org_key, day, p["project_name"])
-            continue
-        for column_name in filled:
-            storage.record_vote(p["poll_id"], columns[column_name], score)
-        logger.info("Autofill [%s] %s / %s: %s set to %s (no vote in %d days)",
-                    org_key, day, p["project_name"], filled or "nobody",
-                    score, after_days)
+            user_id = int(user_id)
+            if storage.has_vote(p["poll_id"], user_id):
+                continue  # voted (maybe still waiting for its sheet write)
+            key = (p["chat_id"], user_id)
+            if key not in membership:
+                membership[key] = await _is_group_member(p["chat_id"], user_id)
+            if membership[key]:
+                columns[column_name] = user_id
+        if columns:
+            try:
+                filled = await asyncio.to_thread(
+                    sheets.fill_empty_scores,
+                    _CFG["sheets"]["projects_tab"],
+                    _CFG["sheets"]["project_name_header"],
+                    p["project_name"], p["date"], list(columns), score,
+                )
+            except Exception:
+                logger.exception("Autofill failed for [%s] %s / %s -- will "
+                                 "retry on the next run", org_key, p["date"],
+                                 p["project_name"])
+                continue
+            for column_name in filled:
+                storage.record_vote(p["poll_id"], columns[column_name], score)
+            logger.info("Autofill [%s] %s / %s: %s set to %s (no vote in %d "
+                        "days)", org_key, p["date"], p["project_name"],
+                        filled or "nobody", score, after_days)
+        storage.mark_autofilled(p["poll_id"])
 
 
 async def _mark_closed(poll_id, chat_id):
@@ -486,6 +557,21 @@ async def on_poll_answer(poll_answer: PollAnswer):
             "" if previous is None else " (was %s)" % previous,
         )
 
+    # Saved locally first: if the sheet write below fails, the vote stays
+    # pending and retry_pending_votes writes it later instead of losing it.
+    async with _vote_write_lock:
+        storage.record_vote(poll_id, user_id, value, synced=False)
+        await _write_vote(meta, org_key, column_name, user_id, value)
+
+
+# Serialises sheet writes of votes, so a retry of an older value can never
+# land after (and overwrite) a newer vote from the same person.
+_vote_write_lock = asyncio.Lock()
+
+
+async def _write_vote(meta, org_key, column_name, user_id, value):
+    """Write one vote to its organization's sheet and mark it synced.
+    Returns False if it failed and should be retried later."""
     if meta["poll_type"] == "own_service":
         tab = _CFG["sheets"]["projects_tab"]
         name_header = _CFG["sheets"]["project_name_header"]
@@ -497,24 +583,52 @@ async def on_poll_answer(poll_answer: PollAnswer):
 
     try:
         await asyncio.to_thread(
-            sheets.record_score,
+            _SHEETS[org_key].record_score,
             tab, name_header, entity_name, meta["date"], column_name, value,
         )
     except SheetColumnMissing as e:
-        logger.warning(
+        # A config mistake, not a temporary error: retrying cannot help.
+        logger.error(
             "Vote from %s (user %s) not written – %s", column_name, user_id, e
         )
-        return
+        storage.mark_vote_synced(meta["poll_id"], user_id, value)
+        return True
     except Exception:
         logger.exception(
-            "Failed to write vote to sheet for %s (user %s) poll_id=%s",
-            column_name, user_id, poll_id,
+            "Failed to write vote to sheet for %s (user %s) poll_id=%s -- "
+            "kept locally, will retry", column_name, user_id, meta["poll_id"],
         )
-        return
+        return False
 
-    storage.record_vote(poll_id, user_id, value)
+    storage.mark_vote_synced(meta["poll_id"], user_id, value)
     logger.info(
         "Recorded %s=%s in [%s] tab %r for [%s / %s]",
         column_name, "cleared" if value is None else value, org_key, tab,
         meta["date"], entity_name,
     )
+    return True
+
+
+async def retry_pending_votes():
+    """Scheduler job: write votes whose sheet write failed earlier."""
+    pending = storage.pending_votes()
+    if not pending:
+        return
+    logger.info("Retrying %d vote(s) not yet written to the sheet",
+                len(pending))
+    for v in pending:
+        org_key = _org_key_for_chat(v["chat_id"])
+        column_name = _voter_column(org_key, v["user_id"]) if org_key else None
+        if org_key not in _SHEETS or not column_name:
+            logger.warning("Dropping pending vote of user %s on poll_id=%s: "
+                           "its group or voter is no longer in config.json",
+                           v["user_id"], v["poll_id"])
+            storage.mark_vote_synced(v["poll_id"], v["user_id"], v["value"])
+            continue
+        async with _vote_write_lock:
+            current = storage.get_pending_vote(v["poll_id"], v["user_id"])
+            if current is None:
+                continue  # written meanwhile by a newer vote
+            if not await _write_vote(v, org_key, column_name, v["user_id"],
+                                     current[0]):
+                return  # sheet still failing -- try again next run

@@ -62,6 +62,7 @@
   "own_service_autofill": {
     "enabled": true,
     "after_days": 2,
+    "catch_up_days": 7,
     "score": 10
   },
   "own_service_description":"Iltimos tanlagan bahoingizga izoh qoldiring",

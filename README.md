@@ -88,12 +88,20 @@ so today's date always shows up in the sheet immediately, even before anyone
 has voted.
 
 **No vote on our own product = 10.** `config.json` → `own_service_autofill`
-(`enabled`, `after_days`: 2, `score`: 10). At every daily run the bot looks
-at the own-service polls (Nasiya / Konveyer — never partners) sent
-`after_days` days ago and writes `score` into the still-empty cell of every
-voter from that organization's `voter_map` who is a member of that group.
-Scores already given are never touched, and a late real vote still
-overwrites the 10.
+(`enabled`, `after_days`: 2, `catch_up_days`: 7, `score`: 10). At every
+daily run the bot looks at the own-service polls (Nasiya / Konveyer /
+Murobaha — never partners) that are at least `after_days` days old and not
+autofilled yet, and writes `score` into the still-empty cell of every voter
+from that organization's `voter_map` who is a member of that group. A day
+the bot was down is caught up on the next run; polls older than
+`after_days + catch_up_days` days are never touched. Scores already given
+are never touched, and a late real vote still overwrites the 10.
+
+**Votes are never dropped on a Sheets error.** Every vote is saved in the
+local database first and then written to the sheet; if Google Sheets fails,
+the vote is retried every 5 minutes until it lands. (On Render's free plan
+the local database is wiped on restart, so a vote still waiting at that
+moment is lost.)
 
 **Score colours.** On startup the bot (re)applies conditional formatting to
 every score column (voters + `Средняя оценка`) of both tabs in every

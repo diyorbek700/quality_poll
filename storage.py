@@ -5,9 +5,11 @@ Two tables:
 * ``polls``  – one row per Telegram poll the bot has sent. This is the
   ``poll_id -> metadata`` map used to route ``poll_answer`` updates to the
   right sheet/row/column, and it survives a bot restart.
-* ``votes``  – the last value the bot recorded for a given (poll, user).
-  Only used for logging / debugging (the Google Sheet is the source of
-  truth); it lets us tell "new vote" from "changed vote" in the logs.
+* ``votes``  – the last value received for a given (poll, user). A vote is
+  stored here *before* it is written to the Google Sheet (``synced = 0``)
+  and marked ``synced = 1`` once the sheet has it, so a vote whose sheet
+  write failed is retried instead of lost. It also lets us tell "new vote"
+  from "changed vote" in the logs.
 """
 
 import logging
@@ -67,7 +69,16 @@ def init_db():
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_polls_date ON polls(date)")
+        _add_column(conn, "votes", "synced", "INTEGER NOT NULL DEFAULT 1")
+        _add_column(conn, "polls", "autofilled", "INTEGER NOT NULL DEFAULT 0")
     logger.info("SQLite storage ready at %s", DB_PATH)
+
+
+def _add_column(conn, table, column, decl):
+    """Add a column to a table created by an older version of this file."""
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
+    if column not in columns:
+        conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))
 
 
 def save_poll(meta):
@@ -189,14 +200,79 @@ def get_previous_vote(poll_id, user_id):
     return row["value"] if row else None
 
 
-def record_vote(poll_id, user_id, value):
+def record_vote(poll_id, user_id, value, synced=True):
+    """Store the latest vote. ``synced=False`` means it still has to be
+    written to the sheet (see pending_votes / mark_vote_synced)."""
     with _lock, _connect() as conn:
         conn.execute(
             """
-            INSERT INTO votes (poll_id, user_id, value, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO votes (poll_id, user_id, value, updated_at, synced)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(poll_id, user_id)
-            DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            DO UPDATE SET value = excluded.value,
+                          updated_at = excluded.updated_at,
+                          synced = excluded.synced
             """,
-            (poll_id, user_id, value, _now_iso()),
+            (poll_id, user_id, value, _now_iso(), int(synced)),
         )
+
+
+def has_vote(poll_id, user_id):
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM votes WHERE poll_id = ? AND user_id = ?",
+            (poll_id, user_id),
+        ).fetchone()
+    return row is not None
+
+
+def mark_vote_synced(poll_id, user_id, value):
+    """Mark a vote as written to the sheet -- only if it is still ``value``,
+    so a newer vote that arrived meanwhile stays pending."""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE votes SET synced = 1 "
+            "WHERE poll_id = ? AND user_id = ? AND value IS ?",
+            (poll_id, user_id, value),
+        )
+
+
+def pending_votes():
+    """Votes not yet written to the sheet, each with its poll's metadata."""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT v.user_id, v.value, p.*
+            FROM votes v JOIN polls p ON p.poll_id = v.poll_id
+            WHERE v.synced = 0
+            ORDER BY v.updated_at
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_pending_vote(poll_id, user_id):
+    """(value,) if this vote is still waiting for its sheet write, else None."""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM votes "
+            "WHERE poll_id = ? AND user_id = ? AND synced = 0",
+            (poll_id, user_id),
+        ).fetchone()
+    return (row["value"],) if row else None
+
+
+def polls_to_autofill():
+    """Own-service polls whose missed votes have not been autofilled yet."""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM polls "
+            "WHERE poll_type = 'own_service' AND autofilled = 0"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_autofilled(poll_id):
+    with _lock, _connect() as conn:
+        conn.execute("UPDATE polls SET autofilled = 1 WHERE poll_id = ?",
+                     (poll_id,))

@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from dotenv import load_dotenv
 
 import polls
@@ -113,9 +114,12 @@ async def check_groups(bot, cfg):
             continue
         try:
             member = await bot.get_chat_member(int(cid), me.id)
-            status = member.status
         except Exception as e:
-            status = "unknown (%s)" % e
+            all_ok = False
+            logger.error("[%s] chat_id=%s title=%r: could not read the bot's "
+                         "membership: %s", label, cid, chat.title, e)
+            continue
+        status = member.status
         can_polls = getattr(member, "can_send_polls", None)
         ok = status in ("administrator", "creator") or can_polls is True
         all_ok = all_ok and ok
@@ -281,6 +285,12 @@ async def run(send_now=False, close_now=False, check_only=False):
             id="close_daily_polls",
             misfire_grace_time=3600,
         )
+    scheduler.add_job(
+        polls.retry_pending_votes,
+        IntervalTrigger(minutes=5, timezone=tz),
+        id="retry_pending_votes",
+        coalesce=True,
+    )
     scheduler.start()
     logger.info(
         "Scheduler started (tz=%s): send at %s, close at %s (%s)",
