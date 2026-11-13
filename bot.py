@@ -171,6 +171,13 @@ def _warn_unneeded_admin_rights(label, member):
         )
 
 
+def _log_memory():
+    rss, peak = webserver.memory_mb()
+    if rss is not None:
+        logger.info("Memory: %s MB now, %s MB peak (Render free limit 512 MB)",
+                    rss, peak)
+
+
 def resolve_google_credentials():
     """Either GOOGLE_CREDENTIALS_JSON (the service-account key, pasted whole
     into an env var — the easy option on PaaS hosts like Render/Railway) or
@@ -285,6 +292,12 @@ async def run(send_now=False, close_now=False, check_only=False):
             id="close_daily_polls",
             misfire_grace_time=3600,
         )
+    scheduler.add_job(
+        _log_memory,
+        IntervalTrigger(minutes=30, timezone=tz),
+        id="log_memory",
+        coalesce=True,
+    )
     scheduler.add_job(
         polls.retry_pending_votes,
         IntervalTrigger(minutes=5, timezone=tz),

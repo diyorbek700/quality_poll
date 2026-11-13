@@ -20,14 +20,32 @@ logger = logging.getLogger("qpoll.webserver")
 _started_at = time.monotonic()
 
 
+def memory_mb():
+    """(current, peak) resident memory of this process in MB, read from
+    /proc on Linux (Render); (None, None) elsewhere."""
+    values = {}
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                key, _, rest = line.partition(":")
+                if key in ("VmRSS", "VmHWM"):
+                    values[key] = round(int(rest.split()[0]) / 1024, 1)
+    except OSError:
+        pass
+    return values.get("VmRSS"), values.get("VmHWM")
+
+
 async def _root(request):
     return web.Response(text="quality_poll bot is running\n")
 
 
 async def _healthz(request):
+    rss, peak = memory_mb()
     return web.json_response({
         "status": "ok",
         "uptime_seconds": int(time.monotonic() - _started_at),
+        "memory_mb": rss,
+        "peak_memory_mb": peak,
     })
 
 
